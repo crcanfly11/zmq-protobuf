@@ -8,89 +8,175 @@
 #include <stdio.h>
 #include <iostream>	
 #include <fstream>
-#include "addressbook.pb.h"
+#include "zmq_helper.h"
+#include "dzh_bus_interface.pb.h"
 
 using namespace std;
+using namespace google;
+using namespace protobuf;
 
-void write()
-{
-	tutorial::AddressBook msgAddressBook; 
-	tutorial::Person* msgPerson = msgAddressBook.add_person();
-	msgPerson->set_id(112);
-	msgPerson->set_name("hello");
-	    
-	// Write the new address book back to disk. 
-	fstream output("./log.pb", ios::out | ios::trunc | ios::binary); 
-        
-	if (!msgAddressBook.SerializeToOstream(&output)) { 
-		cerr << "Failed to write msg." << endl; 
-	}         
-	
-	cout<<"write succeed."<<endl;
-}
-
-void read()
-{
-	tutorial::AddressBook msgAddressBook; 
-	tutorial::Person* msgPerson = msgAddressBook.add_person();
- 
-	fstream input("./log", ios::in | ios::binary); 
-	if (!msgAddressBook.ParseFromIstream(&input)) { 
-		cerr << "Failed to parse address book." << endl; 
-	} 
-  
-	cout << msgPerson->id() << endl; 
-	cout << msgPerson->name() << endl; 
-}
-
-int main (void)
+int main (int argc, char *argv[])
 {
     void *context = zmq_init (1);
 
     //  连接至服务端的套接字
-    printf ("正在连接至hello world服务端...\n");
-    void *requester = zmq_socket (context, ZMQ_REQ);
-    zmq_connect (requester, "tcp://localhost:5555");
+    printf ("正在连接至服务端...\n");
+    void *requester = zmq_socket (context, ZMQ_DEALER);  
+	zmq_setsockopt(requester, ZMQ_IDENTITY, "client1", 7);
 
-	//组建数据流
-	tutorial::AddressBook msgAddressBook; 
-	tutorial::Person* msgPerson = msgAddressBook.add_person();
-	msgPerson->set_id(321);
-	msgPerson->set_name("protobuf111");
+	int err;
+	if(err = zmq_connect(requester, "tcp://localhost:11523") == 0)
+		cout<< "connect succeed."<< endl;
+	else
+		connect_error(err);
 
-	std::string buf;
-	msgAddressBook.SerializeToString(&buf);
+	char* msg = new char[128];
+	
+	while(1) {
+		memset(msg, 0x00, 128);
 
-    zmq_msg_t request;
-	zmq_msg_init(&request);
+		int send_msg_len = zmq_send(requester, "asdfasdf", 8, 0);
+		send_error(send_msg_len);
+		cout<< "send msg:"<< msg<< ", send msg len:"<< send_msg_len<< endl;
 
-	memcpy (zmq_msg_data (&request), (const void*)buf.c_str(), buf.size());
-    printf ("正在发送...\n");
-    int s = zmq_send (requester, &request,  buf.size(), 0);
+		memset(msg, 0x00, 128);
+		int recv_msg_len = zmq_recv(requester, msg, 128, 0);
+		recv_error(recv_msg_len);
+		cout<< "recv msg:"<< msg<< ", recv msg len:"<< recv_msg_len<< endl;
+		cout<< "-----------------------------------"<< endl;
+		Sleep(500);
+	}
 
-	if(s==0)
-		std::cout<< "Succeed."<< std::endl;
-	else if(s == EAGAIN) 
-		std::cout<< "Non-blocking mode was requested and the message cannot be sent at the moment."<< std::endl;
-	else if(s == ENOTSUP) 
-		std::cout<< "The zmq_send() operation is not supported by this socket type."<< std::endl;
-	else if(s == EFSM) 
-		std::cout<< "The zmq_send() operation cannot be performed on this socket at the moment due to the socket not being in the appropriate state. "<< std::endl;
-	else if(s == ETERM) 
-		std::cout<< "The ZMQ context associated with the specified socket was terminated."<< std::endl;
-	else if(s == ENOTSOCK) 
-		std::cout<< "The provided socket was invalid."<< std::endl;
-	else if(s == EINTR) 
-		std::cout<< "The operation was interrupted by delivery of a signal before the message was sent."<< std::endl;
-	else if(s == EFAULT) 
-		std::cout<< "Invalid message."<< std::endl;
-
-    zmq_msg_close (&request);
-
-    zmq_close (requester);
-    zmq_term (context);
+	delete[] msg;
 
 	system("pause");
 
-    return 0;
+	return 0;
 }
+
+//router 转发测试程序
+//int main (int argc, char *argv[])
+//{
+//    void *context = zmq_init (1);
+//
+//    //  连接至服务端的套接字
+//    printf ("正在连接至服务端...\n");
+//    void *requester = zmq_socket (context, ZMQ_DEALER);  
+//	zmq_setsockopt(requester, ZMQ_IDENTITY, "ch1", 3);
+//
+//	int err;
+//	if(err = zmq_connect(requester, "tcp://localhost:11523") == 0)
+//		cout<< "connect succeed."<< endl;
+//	else
+//		error_print(err);
+//
+//	cout<< "------start-------"<< endl;
+//
+//	dzh_bus_interface::Bus_Head bh;
+//	bh.set_bodytype(1);
+//	bh.set_requestid(22);
+//	bh.set_endflag(0);
+//
+//	dzh_bus_interface::LoginReq lg;
+//	lg.set_routerno(1);
+//	lg.set_serverno(2);
+//	
+//	dzh_bus_interface::Body bd;
+//	bd.set_allocated_loginreq(&lg);
+//
+//	bh.set_allocated_body(&bd);
+//	
+//	int size = bh.ByteSize();
+//	char* buf = new char[size];
+//	memset(buf, 0x00, size);
+//	bh.SerializeToArray(buf, size);
+//	zmq_send(requester, buf, size, 0);
+//	cout<< "------send login req------"<< endl;
+//	delete[] buf;
+//	bd.release_loginreq();
+//	bh.release_body();
+//
+//	//应答
+//	cout<< "------ recving login msg`````-------"<< endl;
+//
+//	char msg[1024];
+//	memset(msg, 0x00, sizeof(msg));
+//	int recv_size = zmq_recv(requester,msg,1024, 0);
+//	dzh_bus_interface::Bus_Head rep_bh;
+//	rep_bh.ParseFromArray(msg, recv_size);
+//	dzh_bus_interface::RspInfo rep = rep_bh.body().loginrsp().rspinfo();
+//	cout<< "recv login msg:"<< rep.rspdesc()<< endl;
+//	rep.release_rspdesc();
+//	rep_bh.release_body();
+//
+//	//转发100请求
+//	dzh_bus_interface::Bus_Head bhreq;
+//	bhreq.set_bodytype(100);
+//	bhreq.set_requestid(23);
+//	bhreq.set_endflag(0);	
+//
+//	size = bhreq.ByteSize();
+//	char* buf100 = new char[size];
+//	memset(buf100, 0x00, size);
+//	bhreq.SerializeToArray(buf100, size);
+//	zmq_send(requester, buf100, size, 0);
+//	cout<< "-----send 100 req.-------"<< endl;
+//
+//	//应答
+//	cout<< "------ recving 100 rep`````-------"<< endl;
+//	memset(msg, 0x00, sizeof(msg));
+//	int recv_size100 = zmq_recv(requester,msg,1024, 0);
+//	dzh_bus_interface::Bus_Head rep_bh100;
+//	rep_bh100.ParseFromArray(msg, recv_size100);
+//	cout<< "recv 100:"<< rep_bh100.endflag()<< endl;
+//	rep_bh100.release_body();	
+//	
+//	cout<< "-------end--------"<< endl;
+//
+//    zmq_close (requester);
+//    zmq_term (context);
+//
+//	system("pause");
+//
+//    return 0;
+//}
+
+//int main (void)
+//{
+//    void *context = zmq_init (1);
+//
+//    //  连接至服务端的套接字
+//    printf ("正在连接至服务端...\n");
+//    void *requester = zmq_socket (context, ZMQ_REQ);  
+//	zmq_setsockopt(requester, ZMQ_IDENTITY, "ch1", 3);
+//
+//	int err;
+//	if(err = zmq_connect(requester, "tcp://localhost:15555") == 0)
+//		cout<< "connect succeed."<< endl;
+//	else
+//		error_print(err);
+//
+//	char* send = "hello1234567";
+//	s_send_msg(requester, send);
+//	cout<< "send:"<< send<< endl;
+//
+//	//应答
+//	char* recv1 = s_recv_msg(requester);
+//	cout<< "recv1:"<< recv1<< endl;
+//	free(recv1);
+//
+//	char* recv2 = s_recv_msg(requester);
+//	cout<< "recv2:"<< recv2<< endl;
+//	free(recv2);
+//
+//	char* recv3 = s_recv_msg(requester);
+//	cout<< "recv3:"<< recv3<< endl;
+//	free(recv3);
+//
+//    zmq_close (requester);
+//    zmq_term (context);
+//
+//	system("pause");
+//
+//    return 0;
+//}

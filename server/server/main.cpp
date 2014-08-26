@@ -1,13 +1,10 @@
-//
-//  Hello World ·þÎñ¶Ë
-//  °ó¶¨Ò»¸öREPÌ×½Ó×ÖÖÁtcp://*:5555
-//  ´Ó¿Í»§¶Ë½ÓÊÕHello£¬²¢Ó¦´ðWorld
-//
-#include <zmq.h>
+ï»¿#include <zmq.h>
 #include <stdio.h>
 #include <string.h>
 #include <iostream>
-#include "addressbook.pb.h"
+
+//#include "dzh_bus_interface.pb.h"
+#include "zmq_helper.h"
 
 using namespace std;
 
@@ -15,29 +12,37 @@ int main (void)
 {
     void *context = zmq_init (1);
 
-    //  Óë¿Í»§¶ËÍ¨ÐÅµÄÌ×½Ó×Ö
-    void *responder = zmq_socket (context, ZMQ_REP);
-    zmq_bind (responder, "tcp://*:5555");
+    //  ä¸Žå®¢æˆ·ç«¯é€šä¿¡çš„å¥—æŽ¥å­—
+    void *socket = zmq_socket (context, ZMQ_REP);
+	zmq_setsockopt(socket, ZMQ_IDENTITY, "sv1", 3);
+
+	int err;
+	//if(err = zmq_bind(socket, "tcp://*:15555") == 0)
+	//	cout<< "bind succeed."<< endl;
+	//else
+	//	error_print(err);
+	if(err = zmq_connect(socket, "tcp://localhost:15556") == 0)
+		cout<< "connect succeed."<< endl;
+	else
+		connect_error(err);
+   
 
 	while(1)  {	
-		//  µÈ´ý¿Í»§¶ËÇëÇó
-		zmq_msg_t request;
-		zmq_msg_init (&request);
-		zmq_recv (responder, &request, 5000, 0);   //ZMQ_NOBLOCK
+		//  ç­‰å¾…å®¢æˆ·ç«¯è¯·æ±‚
+		char* s_recv_msg = s_recv(socket);
+		cout<< "recv:"<< recv<< endl;
+		free(recv);
+		
+		//åº”ç­”
+		char* send = "hello world.";
+		s_send_msg(socket, send);
+		cout<< "send:"<< send<< endl;
 
-		string bufRec((const char*)zmq_msg_data(&request));
-		tutorial::AddressBook msgAddressBookRec; 
-		tutorial::Person* msgPersonRec = msgAddressBookRec.add_person();
-		msgAddressBookRec.ParseFromString(bufRec);
-
-		std::cout<< "id:"<< msgPersonRec->id()<< std::endl;
-		std::cout<< "name:"<< msgPersonRec->name()<< std::endl;
-     
-		zmq_msg_close (&request);
+		cout<< "--------------------------------------"<< endl;
 	}
 
-    //  ³ÌÐò²»»áÔËÐÐµ½ÕâÀï£¬ÒÔÏÂÖ»ÊÇÑÝÊ¾ÎÒÃÇÓ¦¸ÃÈçºÎ½áÊø
-    zmq_close (responder);
+    //  ç¨‹åºä¸ä¼šè¿è¡Œåˆ°è¿™é‡Œï¼Œä»¥ä¸‹åªæ˜¯æ¼”ç¤ºæˆ‘ä»¬åº”è¯¥å¦‚ä½•ç»“æŸ
+    zmq_close (socket);
     zmq_term (context);
 
 	system("pause");
