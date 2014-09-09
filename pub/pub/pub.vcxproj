@@ -11,8 +11,8 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{E1E5D4C2-77C4-46A0-BD02-499F605EEFE2}</ProjectGuid>
-    <RootNamespace>router1</RootNamespace>
+    <ProjectGuid>{D586C9A2-C08C-4D94-87E5-17A321AC5B98}</ProjectGuid>
+    <RootNamespace>pub</RootNamespace>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
@@ -68,13 +68,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="..\..\src\dzh_bus_interface.pb.cc" />
-    <ClCompile Include="bus_router.cpp" />
     <ClCompile Include="main.cpp" />
-  </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="..\..\src\dzh_bus_interface.pb.h" />
-    <ClInclude Include="bus_router.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

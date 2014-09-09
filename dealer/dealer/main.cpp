@@ -10,6 +10,53 @@ using namespace std;
 using namespace google;
 using namespace protobuf;
 
+//timer test
+//#include <Windows.h>
+//#include <Mmsystem.h>
+//#pragma comment(lib, "Winmm.lib")
+//
+//int t = 0;
+//
+//void WINAPI onTimeFunc(UINT wTimerID, UINT msg,DWORD dwUser,DWORD dwl,DWORD dw2);
+//void WINAPI onTimeFunc1(UINT wTimerID, UINT msg,DWORD dwUser,DWORD dwl,DWORD dw2);
+//
+//int main(int argc, char *argv[]) 
+//{
+//    MMRESULT timer_id,timer_id1;
+//    int n = 1;
+//    timer_id = timeSetEvent(5000, 1, (LPTIMECALLBACK)onTimeFunc, DWORD(1), TIME_PERIODIC);
+//	timer_id1 = timeSetEvent(1000, 1, (LPTIMECALLBACK)onTimeFunc1, DWORD(1), TIME_PERIODIC);
+//    if(NULL == timer_id)
+//    {
+//        printf("timeSetEvent() failed with error %d\n", GetLastError());
+//        return 0;
+//    }
+//
+//	Sleep(2000);
+//
+//    while(n<50)
+//    {
+//        printf("Hello World");
+//        Sleep(2000);
+//        n++;
+//    }
+//    timeKillEvent(timer_id);        //释放定时器
+//    return 1;	
+//};
+//
+//void WINAPI onTimeFunc(UINT wTimerID, UINT msg,DWORD dwUser,DWORD dwl,DWORD dw2)
+//{
+//    printf("time out");
+//    return;
+//}
+//
+//void WINAPI onTimeFunc1(UINT wTimerID, UINT msg,DWORD dwUser,DWORD dwl,DWORD dw2)
+//{
+//	t++;
+//	printf("\nID:%d  ", t);
+//}
+
+
 //router dealer模式 不需要传0帧
 //提供 service 100 200 
 int main(int argc, char *argv[])
@@ -19,37 +66,37 @@ int main(int argc, char *argv[])
 	zmq_setsockopt(dealer, ZMQ_IDENTITY, "dealer1", 7);
 
 	int err;
-	if(err = zmq_connect(dealer, "tcp://localhost:11523") == 0)
+	//if(err = zmq_connect(dealer, "tcp://10.15.89.122:36000") == 0)
+	if(err = zmq_connect(dealer, "tcp://localhost:36000") == 0)
 		cout<< "connected."<< endl;
 	else 
 		bind_error(err);
 
 	cout<< "------start-------"<< endl;
 
-	dzh_bus_interface::Bus_Head bh;
-	bh.set_bodytype(1);
-	bh.set_requestid(100);
-	bh.set_endflag(3);
-
 	dzh_bus_interface::LoginReq lg;
 	lg.add_serviceno(100);
 	lg.add_serviceno(200);
+	lg.add_serviceno(300);
 
-	dzh_bus_interface::Body b;
-	b.set_allocated_loginreq(&lg);
+	std::string lg_buf; 	
+	lg.SerializeToString(&lg_buf);
 
-	bh.set_allocated_body(&b);
+	dzh_bus_interface::Bus_Head bh;
+	bh.set_command(1);
+	bh.set_requestid(10001);
+	bh.set_allocated_data(&lg_buf);
 
-	int size = bh.ByteSize();
-	char* buf = new char[size];
-	memset(buf, 0x00, size);
-	bh.SerializeToArray(buf, size);
+	int bh_size = bh.ByteSize();
+	char* bh_buf = new char[bh_size];
+	memset(bh_buf, 0x00, bh_size);
+	bh.SerializeToArray(bh_buf, bh_size);
 	
-	zmq_send(dealer, buf, size, 0);
+	zmq_send(dealer, bh_buf, bh_size, 0);
+
 	cout<< "--------send login req--------"<< endl;
-	delete[] buf;
-	b.release_loginreq();
-	bh.release_body();
+	delete[] bh_buf;
+	bh.release_data();
 
 	cout<< "------ recving login msg`````-------"<< endl;
 
@@ -63,10 +110,21 @@ int main(int argc, char *argv[])
 
 	dzh_bus_interface::Bus_Head rep_bh;
 	rep_bh.ParseFromArray(msg, recv_size);
-	dzh_bus_interface::RspInfo rep = rep_bh.body().loginrsp().rspinfo();
-	cout<< "recv login msg:"<< rep.rspdesc()<< endl;
-	rep.release_rspdesc();
-	rep_bh.release_body();
+
+	if(rep_bh.command() == 2) {
+		dzh_bus_interface::LoginRsp lgin_rsp;
+		lgin_rsp.ParseFromString(rep_bh.data());
+		cout<< "recv login rsp msg:"<< lgin_rsp.rspinfo().rspdesc()<< endl;
+		lgin_rsp.release_rspinfo();
+	}
+	else {
+		dzh_bus_interface::RspInfo rspinfo;
+		rspinfo.ParseFromString(rep_bh.data());
+		cout<< "recv error msg:"<< rspinfo.rspdesc()<< endl;
+		rspinfo.release_rspdesc();
+		return 0;
+	}
+	rep_bh.release_data();		
 
 	cout<< "--------begin server--------"<< endl;
 	while(1) {
@@ -75,10 +133,10 @@ int main(int argc, char *argv[])
 		dzh_bus_interface::Bus_Head bh;
 		bh.ParseFromArray(msg, size1);
 
-		if(bh.bodytype() == 100) {
+		if(bh.serviceno() == 100) {
 			bh.set_endflag(11111);
 		}
-		else if(bh.bodytype() == 200) {
+		else if(bh.serviceno() == 200) {
 			bh.set_endflag(22222);
 		}
 
@@ -138,61 +196,3 @@ int main(int argc, char *argv[])
 //
 //	system("pause");
 //};
-
-//void main()
-//{
-//	void *context = zmq_init(1);
-//	void *dealer = zmq_socket(context, ZMQ_DEALER);
-//	//zmq_setsockopt(dealer, ZMQ_IDENTITY, "dealer1", 7);
-//
-//	if(int err = zmq_connect(dealer, "tcp://localhost:11523") == 0)
-//		cout<< "connected."<< endl;
-//	else 
-//		connect_error(err);
-//
-//	char addr[256];
-//	char msg[256];
-//
-//	while(1) {
-//		memset(addr, 0x00, sizeof(addr));
-//		memset(msg, 0x00, sizeof(msg));
-//
-//		zmq_send(dealer,"cccc", 4, 0);
-//		cout<< "send: cccc"<< endl;
-//
-//		//zmq_recv(dealer,addr,sizeof(addr)-1, 0);
-//		zmq_recv(dealer,msg,sizeof(msg), 0);
-//
-//		cout<< "recv addr:"<< addr<< endl;
-//		cout<< "recv msg:"<< msg<< endl;
-//		cout<< "-----------------------------"<< endl;
-//	}
-//}
-
-//int main(int argc,char* argv[]){
-//    void * context = zmq_init(1);
-//    void* client = zmq_socket(context,ZMQ_ROUTER);
-//	zmq_setsockopt (client, ZMQ_IDENTITY, "router2", 7);
-//	
-//	zmq_connect(client,"tcp://localhost:11523");
-//
-//
-//	char msg[256];
-//	char addr[256];
-//	  
-//    for(int idx = 0; idx < 10000; ++idx){
-//		zmq_send(client,"router1",7,ZMQ_SNDMORE);
-//        zmq_send(client,"rtor",4,0);
-//
-//		memset(addr,0x00,sizeof(addr));
-//		zmq_recv(client,addr,sizeof(addr)-1,0);
-//		memset(msg,0x00,sizeof(msg));
-//		zmq_recv(client,msg,sizeof(msg)-1,0);
-//
-//		cout<< "recv addr:"<< addr<< endl;
-//        cout<< "recv msg:"<< msg<< endl;
-//    }
-//    zmq_close(client);
-//    zmq_ctx_destroy(context);
-//    return 0;
-//}
