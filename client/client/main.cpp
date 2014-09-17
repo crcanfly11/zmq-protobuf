@@ -55,16 +55,35 @@ using namespace protobuf;
 //}
 
 //router 转发测试程序
+struct request_string_data
+{
+	unsigned int command_id;
+	bool has_serviceNo;
+	vector<string> serviceName_vec;
+	unsigned int serviceName_cnt;
+};
+
+void split_commond(std::string str, request_string_data& rd)
+{
+	if(str.find("reply/bus/login") != string::npos)
+		rd.command_id = 1;
+	else if(str.find("reply/bus/logout") != string::npos)
+		rd.command_id = 2;
+	else 
+		rd.command_id = 0;
+};
+
 int main (int argc, char *argv[])
 {
-    void *context = zmq_init (1);
+	void *context = zmq_init (1);
 
     //  连接至服务端的套接字
     printf ("正在连接至服务端...\n");
     void *requester = zmq_socket (context, ZMQ_DEALER);  
-	zmq_setsockopt(requester, ZMQ_IDENTITY, "ch1", 3);
+	//zmq_setsockopt(requester, ZMQ_IDENTITY, "ch1", 3);
 
 	int err;
+	//if(err = zmq_connect(requester, "tcp://10.15.89.122:36000") == 0)
 	if(err = zmq_connect(requester, "tcp://localhost:36000") == 0)
 		cout<< "connect succeed."<< endl;
 	else
@@ -72,13 +91,15 @@ int main (int argc, char *argv[])
 
 	cout<< "------start-------"<< endl;
 
-	dzh_bus_interface::LoginReq lg;
+	dzh_bus_interface::AnyReq lg;
+	string str = "bus/login";
+	lg.set_allocated_url(&str);
 
 	std::string lg_buf; 	
 	lg.SerializeToString(&lg_buf);
 
 	dzh_bus_interface::Bus_Head bh;
-	bh.set_command(1);
+	bh.set_servicename("bus/login");
 	bh.set_requestid(10001);
 	bh.set_allocated_data(&lg_buf);
 
@@ -91,12 +112,13 @@ int main (int argc, char *argv[])
 
 	cout<< "------send login req------"<< endl;
 	delete[] bh_buf;
+	lg.release_url();
 	bh.release_data();
 
 	//应答
 	cout<< "------ recving login msg`````-------"<< endl;
 
-	char addr[256];
+	char addr[256]; 
 	char msg[1024];
 
 	memset(addr, 0x00, sizeof(addr));
@@ -107,7 +129,10 @@ int main (int argc, char *argv[])
 	dzh_bus_interface::Bus_Head rep_bh;
 	rep_bh.ParseFromArray(msg, recv_size);
 
-	if(rep_bh.command() == 2) {
+	request_string_data rd;
+	split_commond(rep_bh.servicename(), rd);
+
+	if(rd.command_id == 1) {
 		dzh_bus_interface::LoginRsp lgin_rsp;
 		lgin_rsp.ParseFromString(rep_bh.data());
 		dzh_bus_interface::RspInfo rspinfo = lgin_rsp.rspinfo();
@@ -128,7 +153,7 @@ int main (int argc, char *argv[])
 
 	//转发100请求
 	dzh_bus_interface::Bus_Head bhreq;
-	bhreq.set_serviceno(100);
+	bhreq.set_servicename("a");
 	bhreq.set_requestid(2301);
 
 	int bhreq_size = bhreq.ByteSize();
@@ -146,7 +171,19 @@ int main (int argc, char *argv[])
 	int recv_size100 = zmq_recv(requester,msg,1024, 0);
 	dzh_bus_interface::Bus_Head rep_bh100;
 	rep_bh100.ParseFromArray(msg, recv_size100);
-	cout<< "recv 100:"<< rep_bh100.endflag()<< endl;
+
+	if(strcmp(rep_bh100.servicename().c_str(), "a") == 0) 
+		cout<< "recv a:"<< rep_bh100.endflag()<< endl;
+	else if(strcmp(rep_bh100.servicename().c_str(), "b") == 0) 
+		cout<< "recv b:"<< rep_bh100.endflag()<< endl;
+	else if(strcmp(rep_bh100.servicename().c_str(), "c") == 0) 
+		cout<< "recv c:"<< rep_bh100.endflag()<< endl;
+	else {
+		dzh_bus_interface::RspInfo rsp;
+		rsp.ParseFromString(rep_bh100.data());	
+		cout<< "error:"<< rsp.rspdesc()<< endl;
+	}
+
 	rep_bh100.release_data();	
 	
 	cout<< "-------end--------"<< endl;

@@ -1,6 +1,5 @@
 #include "bus_router.h"
 
-
 bus_router::bus_router() : router_socket_(NULL), addr_length_(0), msg_length_(0), requestID_(0)
 {
 	p_addr_ = NULL; p_msg_ = NULL;
@@ -40,13 +39,16 @@ void bus_router::run()
 			p_addr_[addr_length_] = 0;
 			p_msg_[msg_length_] = 0;
 
-			dzh_bus_interface::Bus_Head bus;
+			BusHead bus;
 			bus.ParseFromArray(p_msg_, msg_length_);
 
-			switch(bus.command())
+			request_string_data rd;
+			split_command(bus.servicename(), rd); 
+	
+			switch(rd.command_id)
 			{
 				case 1:
-					router_loginReq(&bus);
+					router_loginReq(&bus, &rd); 
 					break;
 				case 3:
 					router_logoutReq(&bus);
@@ -82,6 +84,60 @@ void bus_router::run()
 	}	
 };
 
+void bus_router::split_command(std::string str, request_string_data& rd)
+{
+	if(strncmp((char*)str.substr(0,3).c_str(), "bus", 3) != 0) {
+		rd.command_id = 0;
+		return;
+	}
+
+	if(str.find("login") != string::npos)
+		rd.command_id = 1;
+	else if(str.find("logout") != string::npos)
+		rd.command_id = 3;
+	else 
+		rd.command_id = 0;
+};
+
+void bus_router::split_anyreq(std::string str, request_string_data& rd)
+{
+	int idx_split = str.find("?");
+	if(idx_split == string::npos) { 
+		rd.serviceName_cnt = 0;
+		return;
+	}
+
+	rd.serviceName_vec.clear();
+
+	int idx_comma_begin = str.find("=", idx_split);
+	int idx_comma_end = str.find(",", idx_comma_begin);
+
+	if(idx_comma_end == string::npos) {
+		string str_only = &str[idx_comma_begin+1];
+		if(!str_only.empty())
+			rd.serviceName_vec.push_back(str_only);	
+	}
+	else {
+		if(idx_comma_begin != string::npos) {
+			rd.serviceName_vec.push_back(str.substr(idx_comma_begin+1, idx_comma_end-idx_comma_begin-1));	
+			idx_comma_begin = idx_comma_end;
+			while(1) {
+				idx_comma_end = str.find(",", idx_comma_begin+1);
+				if(idx_comma_begin != string::npos) {
+					rd.serviceName_vec.push_back(str.substr(idx_comma_begin+1, idx_comma_end-idx_comma_begin-1));	
+					idx_comma_begin = idx_comma_end;
+				}
+				else 
+					break;
+			}
+		}	
+	}
+	
+	rd.serviceName_cnt = rd.serviceName_vec.size();	
+
+	return;
+};
+
 void bus_router::print_map()
 {
 	cout<< "---------addr_map_---------"<< endl;
@@ -93,8 +149,8 @@ void bus_router::print_map()
 
 	cout<< "---------serviceNo_map_---------"<< endl;
 
-	serviceNo_map::iterator iter_service_print = serviceNo_map_.begin();
-	for(;iter_service_print!= serviceNo_map_.end();++iter_service_print) {
+	service_Name_map::iterator iter_service_print = service_Name_map_.begin();
+	for(;iter_service_print!= service_Name_map_.end();++iter_service_print) {
 		cout<< iter_service_print->first<< ", ";
 		map<string, addr_data> ve = iter_service_print->second;
 		map<string, addr_data>::iterator iter_map = ve.begin();
@@ -107,60 +163,57 @@ void bus_router::print_map()
 	cout<< "---------end---------"<< endl;	
 };
 
-void bus_router::router_loginReq(dzh_bus_interface::Bus_Head* bus)
+void bus_router::router_loginReq(BusHead* bus, request_string_data* rd)
 {
-	dzh_bus_interface::LoginReq loginReq;
+	AnyReq loginReq;
 	loginReq.ParseFromString(bus->data());
 
 	if(!find_address_map(p_addr_)) {
 		send_error_msg_back(bus, "already logined.");
 		return;
 	}
-
+	
+	split_anyreq(loginReq.url(), *rd);
 	addr_data adt;
-	adt.addr = p_addr_;
+	adt.addr.assign(p_addr_, addr_length_);
 	adt.addr_length = addr_length_;
 	adt.ServerNo = 0;
 	//adt.ServerNo = loginReq.serverno();
-
-	int size = loginReq.serviceno_size();
-	for(int i=0; i<size; ++i) {
-		adt.ServiceNo_vector.push_back(loginReq.serviceno(i));
+	
+	unsigned int size = rd->serviceName_cnt;
+	for(unsigned int i=0; i<size; ++i) {
+		adt.ServiceName_vector.push_back(rd->serviceName_vec[i]);
 	}
 
 	//add address
-	addr_map_.insert(addr_pair(p_addr_,adt));
+	addr_map_.insert(addr_pair(string(p_addr_, addr_length_),adt));
 
 	//业务逻辑未确定
 	//serverNo_map_.insert(pair<unsigned int, addr_pair>(adt.ServerNo, addr_pair(p_addr_,adt)));
 
 	//add service No
-	if(!adt.ServiceNo_vector.empty()) {
-		for(int i=0; i<size; ++i) {
-			serviceNo_map::iterator iter_serviceNo = serviceNo_map_.find(adt.ServiceNo_vector[i]);
-			if(iter_serviceNo != serviceNo_map_.end()) {
-				iter_serviceNo->second.insert(pair<string, addr_data>(p_addr_, adt));
+	if(!adt.ServiceName_vector.empty()) {
+		for(unsigned int i=0; i<size; ++i) {
+			service_Name_map::iterator iter_serviceName = service_Name_map_.find(adt.ServiceName_vector[i]);
+			if(iter_serviceName != service_Name_map_.end()) {
+				iter_serviceName->second.insert(pair<string, addr_data>(string(p_addr_, addr_length_), adt));
 			}
 			else {
 				map<string, addr_data> string_map;
-				string_map.insert(addr_pair(p_addr_, adt));
-				serviceNo_map_.insert(pair<unsigned int, map<string, addr_data>>(adt.ServiceNo_vector[i], string_map));
+				string_map.insert(addr_pair(string(p_addr_, addr_length_), adt));
+				service_Name_map_.insert(pair<string, map<string, addr_data>>(adt.ServiceName_vector[i], string_map));
 			}
 		}	
 	}
 
 	//print_map();
-
 	//应答
-	router_loginRsp(bus);
+	router_loginRsp(bus, rd);
 };
 
-void bus_router::router_loginRsp(dzh_bus_interface::Bus_Head* bus)
+void bus_router::router_loginRsp(BusHead* bus, request_string_data* rd)
 {
-	dzh_bus_interface::LoginReq loginReq;
-	loginReq.ParseFromString(bus->data());
-
-	int size = loginReq.serviceno_size();
+	int size = rd->serviceName_cnt;
 
 	char buf_serviceno[64];
 	sprintf(buf_serviceno, "register %d service. ", size);
@@ -170,49 +223,59 @@ void bus_router::router_loginRsp(dzh_bus_interface::Bus_Head* bus)
 	if(size != 0) 
 		strncat(buf_str, buf_serviceno, sizeof(buf_serviceno));
 
-	dzh_bus_interface::RspInfo rsp;
+	RspInfo rsp;
 	rsp.set_rspno(0);
 	std::string str = buf_str;
 	rsp.set_allocated_rspdesc(&str);
 
-	dzh_bus_interface::LoginRsp lgin_rsp;
+	LoginRsp lgin_rsp;
 	lgin_rsp.set_allocated_rspinfo(&rsp);
 
 	string lgin_rsp_str;
 	lgin_rsp.SerializeToString(&lgin_rsp_str);
 
-	send_msg(lgin_rsp_str, 2, bus);
+	BusHead bh;
+	bh.set_servicename("reply/bus/login");
+	bh.set_requestid(bus->requestid());
+	bh.set_allocated_data(&lgin_rsp_str);
+	
+	int bh_size = bh.ByteSize();
+	void* bh_buf = malloc(bh_size);
+	bh.SerializeToArray(bh_buf, bh_size);	
+	send_msg(p_addr_, addr_length_, bh_buf, bh_size);
 
+	free(bh_buf);	
+	bh.release_data();
 	rsp.release_rspdesc();
 	lgin_rsp.release_rspinfo();
 };
 
-void bus_router::router_logoutReq(dzh_bus_interface::Bus_Head* bus)
+void bus_router::router_logoutReq(BusHead* bus)
 {
-	addr_map::iterator iter_addr_map = addr_map_.find(p_addr_);
+	addr_map::iterator iter_addr_map = addr_map_.find(string(p_addr_, addr_length_));
 	if(iter_addr_map == addr_map_.end()) {
 		send_error_msg_back(bus, "unregistered.");
 		return;
 	}
 
-	vector<unsigned int> lgout_serviceNo_vec = iter_addr_map->second.ServiceNo_vector;
-	int size = lgout_serviceNo_vec.size();
+	vector<string> lgout_serviceName_vec = iter_addr_map->second.ServiceName_vector;
+	int size = lgout_serviceName_vec.size();
 	for(int i=0;i<size;++i) {
-		serviceNo_map::iterator iter_serviceNo_map = serviceNo_map_.find(lgout_serviceNo_vec[i]);
-		if(iter_serviceNo_map == serviceNo_map_.end()) {
+		service_Name_map::iterator iter_serviceName_map = service_Name_map_.find(lgout_serviceName_vec[i]);
+		if(iter_serviceName_map == service_Name_map_.end()) {
 			continue;
 		}
 		else {
-			if(iter_serviceNo_map->second.size() == 1) {
-				serviceNo_map_.erase(iter_serviceNo_map);
+			if(iter_serviceName_map->second.size() == 1) {
+				service_Name_map_.erase(iter_serviceName_map);
 			}
 			else {
-				map<string, addr_data>::iterator iter_string = iter_serviceNo_map->second.find(p_addr_);
-				if(iter_string == iter_serviceNo_map->second.end()) {
+				map<string, addr_data>::iterator iter_string = iter_serviceName_map->second.find(string(p_addr_, addr_length_));
+				if(iter_string == iter_serviceName_map->second.end()) {
 					continue;				
 				}
 				else {
-					iter_serviceNo_map->second.erase(iter_string);
+					iter_serviceName_map->second.erase(iter_string);
 				}
 			}		
 		}
@@ -221,37 +284,48 @@ void bus_router::router_logoutReq(dzh_bus_interface::Bus_Head* bus)
 	router_logoutRsp(bus);
 };
 
-void bus_router::router_logoutRsp(dzh_bus_interface::Bus_Head* bus)
+void bus_router::router_logoutRsp(BusHead* bus)
 {
-	dzh_bus_interface::RspInfo rsp;
+	RspInfo rsp;
 	rsp.set_rspno(0);
 	std::string str("logout succeed.");
 	rsp.set_allocated_rspdesc(&str);
 
-	dzh_bus_interface::LogoutRsp lgout_rsp;
+	LogoutRsp lgout_rsp;
 	lgout_rsp.set_allocated_rspinfo(&rsp);
 
 	std::string lgout_rsp_str;
 	lgout_rsp.SerializeToString(&lgout_rsp_str);
 
-	send_msg(lgout_rsp_str, 4, bus);
+	BusHead bh;
+	bh.set_servicename("reply/bus/logout");
+	bh.set_requestid(bus->requestid());
+	bh.set_allocated_data(&lgout_rsp_str);
+	
+	int bh_size = bh.ByteSize();
+	void* bh_buf = malloc(bh_size);
+	bh.SerializeToArray(bh_buf, bh_size);	
+	send_msg(p_addr_, addr_length_, bh_buf, bh_size);
 
+	free(bh_buf);	
+	bh.release_data();
+	bh.release_servicename();
 	rsp.release_rspdesc();
 	lgout_rsp.release_rspinfo();
 };
 
-void bus_router::router_other_dealer(dzh_bus_interface::Bus_Head* bus)
+void bus_router::router_other_dealer(BusHead* bus)
 {
-	requestID_map::iterator iter_requestID = requestID_map_.find(requestID_pair(p_addr_, bus->requestid()));
+	requestID_map::iterator iter_requestID = requestID_map_.find(requestID_pair(string(p_addr_, addr_length_), bus->requestid()));
 	if(iter_requestID == requestID_map_.end()) {
-		serviceNo_map::iterator iter_servieNo = serviceNo_map_.find(bus->serviceno());
-		if(iter_servieNo == serviceNo_map_.end()) {
+		service_Name_map::iterator iter_servieName = service_Name_map_.find(bus->servicename());
+		if(iter_servieName == service_Name_map_.end()) {
 			send_error_msg_back(bus, "unregistered body type no.");
 			return;
 		}
 		else {    
-			int size = iter_servieNo->second.size();
-			map<string, addr_data>::iterator iter_string = iter_servieNo->second.begin();
+			int size = iter_servieName->second.size();
+			map<string, addr_data>::iterator iter_string = iter_servieName->second.begin();
 			
 			//随机地址
 			srand(0);
@@ -285,7 +359,7 @@ void bus_router::add_requestID_map(string addr, unsigned int requestID)
 	addr_data ad;
 	ad.addr_length = addr_length_;
 	ad.requestID = requestID;
-	addr_pair req_addr(p_addr_, ad);
+	addr_pair req_addr(string(p_addr_, addr_length_), ad);
 
 	requestID_map_.insert(pair<requestID_pair, addr_pair>(req_requestID, req_addr));
 
@@ -309,7 +383,7 @@ void bus_router::send_msg(void* addr, unsigned int addr_len, void* msg, unsigned
 	zmq_send(router_socket_, msg, msg_len, 0);
 };
 
-void bus_router::send_msg(void* addr, unsigned int addr_len, dzh_bus_interface::Bus_Head* bus)
+void bus_router::send_msg(void* addr, unsigned int addr_len, BusHead* bus)
 {
 	int size_buf = bus->ByteSize();
 	void* buf = malloc(size_buf);
@@ -320,48 +394,43 @@ void bus_router::send_msg(void* addr, unsigned int addr_len, dzh_bus_interface::
 	free(buf);	
 }
 
-void bus_router::send_msg(std::string& buf, int cmd, dzh_bus_interface::Bus_Head* bus)
+void bus_router::send_error_msg_back(BusHead* bus, char* msg)
 {
-	dzh_bus_interface::Bus_Head bh;
-	bh.set_command(cmd);
-	bh.set_requestid(bus->requestid());
-	bh.set_allocated_data(&buf);
-	
-	int bh_size = bh.ByteSize();
-	void* bh_buf = malloc(bh_size);
-	bh.SerializeToArray(bh_buf, bh_size);	
-	send_msg(p_addr_, addr_length_, bh_buf, bh_size);
-	
-	free(bh_buf);	
-	bh.release_data();
-}
-
-void bus_router::send_error_msg_back(dzh_bus_interface::Bus_Head* bus, char* msg)
-{
-	dzh_bus_interface::RspInfo rsp;
-	rsp.set_rspno(0);
+	RspInfo rsp;
+	rsp.set_rspno(-1);                  //错误编号 没有对应关系
 	rsp.set_rspdesc(msg, strlen(msg));
 
 	std::string rsp_str;
 	rsp.SerializeToString(&rsp_str);
 
-	send_msg(rsp_str, 0 ,bus);
+	BusHead bh;
+	bh.set_servicename("reply/bus/rspinfo");
+	bh.set_requestid(bus->requestid());
+	bh.set_allocated_data(&rsp_str);
+	
+	int bh_size = bh.ByteSize();
+	void* bh_buf = malloc(bh_size);
+	bh.SerializeToArray(bh_buf, bh_size);	
+	send_msg(p_addr_, addr_length_, bh_buf, bh_size);
 
+	free(bh_buf);	
+	bh.release_data();
+	bh.release_servicename();
 	rsp.release_rspdesc();
 };
 
 int bus_router::find_address_map(char* addr)
 {
-	//cout<< "--------------address map size--------------"<< endl;
-	//cout<< addr_map_.size()<< endl;
-	//cout<< "--------------addr map content--------------"<< endl;
-	//addr_map::iterator iter_print = addr_map_.begin();
-	//for(;iter_print!=addr_map_.end();++iter_print) {
-	//	cout<< iter_print->first<< endl;
-	//}	
+	cout<< "--------------address map size--------------"<< endl;
+	cout<< addr_map_.size()<< endl;
+	cout<< "--------------addr map content--------------"<< endl;
+	addr_map::iterator iter_print = addr_map_.begin();
+	for(;iter_print!=addr_map_.end();++iter_print) {
+		cout<< iter_print->first<< endl;
+	}	
 
-	//cout<< "--------------find address--------------"<< endl;
-	//cout<< addr<< endl;
+	cout<< "--------------find address--------------"<< endl;
+	cout<< addr<< endl;
 
 	addr_map::iterator iter_addr_map = addr_map_.find(addr);
 	if(iter_addr_map == addr_map_.end())
@@ -372,7 +441,10 @@ int bus_router::find_address_map(char* addr)
 
 void bus_router::recycling_watcher()
 {
-	if(timer_map_.empty() == true) return;
+	//send_msg("hi", 2, "rsp hi", 6);
+	//send_msg("hello", 5, "rsp hello", 9);
+
+	if(timer_map_.empty()) return;
 
 	long tm = (long)time(NULL);
 	timer_map::iterator iter_timer = timer_map_.begin();
@@ -383,14 +455,21 @@ void bus_router::recycling_watcher()
 
 		//send error msg 
 		requestID_map::iterator iter_request = requestID_map_.find(iter_timer->second);
+		if(iter_request == requestID_map_.end()) {
+			timer_map::iterator iter_timer_erase = iter_timer++;
+			timer_map_.erase(iter_timer_erase);
+			continue;
+		}
+
 		addr_pair rep_addr = iter_request->second;
 		
-		dzh_bus_interface::Bus_Head rep_bh;
+		BusHead rep_bh;
+		rep_bh.set_servicename("reply/bus/rspinfo");
 		rep_bh.set_requestid(rep_addr.second.requestID);
 
 		std::string str("replay time out.");
-		dzh_bus_interface::RspInfo rsp;
-		rsp.set_rspno(0);
+		RspInfo rsp;
+		rsp.set_rspno(-1);
 		rsp.set_allocated_rspdesc(&str);
 
 		std::string rsp_str;
@@ -407,8 +486,11 @@ void bus_router::recycling_watcher()
 		free(bh_buf);	
 		rsp.release_rspdesc();
 		rep_bh.release_data();
+		rep_bh.release_servicename();
 
 		timer_map::iterator iter_timer_erase = iter_timer++;
 		timer_map_.erase(iter_timer_erase);
+
+		requestID_map_.erase(iter_request);
 	}
 };

@@ -58,12 +58,30 @@ using namespace protobuf;
 
 
 //router dealer模式 不需要传0帧
-//提供 service 100 200 
+
+struct request_string_data
+{
+	unsigned int command_id;
+	bool has_serviceNo;
+	vector<string> serviceName_vec;
+	unsigned int serviceName_cnt;
+};
+
+void split_commond(std::string str, request_string_data& rd)
+{
+	if(str.find("reply/bus/login") != string::npos)
+		rd.command_id = 1;
+	else if(str.find("reply/bus/logout") != string::npos)
+		rd.command_id = 2;
+	else 
+		rd.command_id = 0;
+};
+
 int main(int argc, char *argv[])
 {
 	void *context = zmq_init(1);
 	void *dealer = zmq_socket (context, ZMQ_DEALER);
-	zmq_setsockopt(dealer, ZMQ_IDENTITY, "dealer1", 7);
+	//zmq_setsockopt(dealer, ZMQ_IDENTITY, "dealer", 7);
 
 	int err;
 	//if(err = zmq_connect(dealer, "tcp://10.15.89.122:36000") == 0)
@@ -74,16 +92,15 @@ int main(int argc, char *argv[])
 
 	cout<< "------start-------"<< endl;
 
-	dzh_bus_interface::LoginReq lg;
-	lg.add_serviceno(100);
-	lg.add_serviceno(200);
-	lg.add_serviceno(300);
-
+	dzh_bus_interface::AnyReq lg;
+	string str = "bus/login?ServiceName=a";
+	lg.set_allocated_url(&str);
+	
 	std::string lg_buf; 	
 	lg.SerializeToString(&lg_buf);
 
 	dzh_bus_interface::Bus_Head bh;
-	bh.set_command(1);
+	bh.set_servicename("bus/login");
 	bh.set_requestid(10001);
 	bh.set_allocated_data(&lg_buf);
 
@@ -96,6 +113,7 @@ int main(int argc, char *argv[])
 
 	cout<< "--------send login req--------"<< endl;
 	delete[] bh_buf;
+	lg.release_url();
 	bh.release_data();
 
 	cout<< "------ recving login msg`````-------"<< endl;
@@ -111,7 +129,10 @@ int main(int argc, char *argv[])
 	dzh_bus_interface::Bus_Head rep_bh;
 	rep_bh.ParseFromArray(msg, recv_size);
 
-	if(rep_bh.command() == 2) {
+	request_string_data rd;
+	split_commond(rep_bh.servicename(), rd);
+
+	if(rd.command_id == 1) {
 		dzh_bus_interface::LoginRsp lgin_rsp;
 		lgin_rsp.ParseFromString(rep_bh.data());
 		cout<< "recv login rsp msg:"<< lgin_rsp.rspinfo().rspdesc()<< endl;
@@ -122,7 +143,6 @@ int main(int argc, char *argv[])
 		rspinfo.ParseFromString(rep_bh.data());
 		cout<< "recv error msg:"<< rspinfo.rspdesc()<< endl;
 		rspinfo.release_rspdesc();
-		return 0;
 	}
 	rep_bh.release_data();		
 
@@ -133,11 +153,14 @@ int main(int argc, char *argv[])
 		dzh_bus_interface::Bus_Head bh;
 		bh.ParseFromArray(msg, size1);
 
-		if(bh.serviceno() == 100) {
+		if(strcmp(bh.servicename().c_str(), "a") == 0) {
 			bh.set_endflag(11111);
 		}
-		else if(bh.serviceno() == 200) {
+		else if(strcmp(bh.servicename().c_str(), "b") == 0) {
 			bh.set_endflag(22222);
+		}
+		else if(strcmp(bh.servicename().c_str(), "c") == 0) {
+			bh.set_endflag(33333);
 		}
 
 		memset(msg, 0x00, sizeof(msg));
@@ -147,6 +170,9 @@ int main(int argc, char *argv[])
 		zmq_send(dealer, msg, buf_si, 0);
 
 		cout<< "send end flag rep:"<< bh.endflag()<< endl;
+
+		bh.release_data();
+		bh.release_servicename();
 	}
 
 	cout<< "---------end----------"<< endl;
