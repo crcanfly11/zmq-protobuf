@@ -30,8 +30,12 @@ int main(int argc, char *argv[])
 
 	if(int err = zmq_bind(socket, "tcp://*:36000") == 0)
 		cout<< "binded."<< endl;
-	else 
+	else {
 		bind_error(err);
+		zmq_close(socket);
+		zmq_ctx_destroy(context);
+		return 0;
+	}
 
 	bus_router rt(socket);
 	rt.run();

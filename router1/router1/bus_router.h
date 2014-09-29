@@ -21,14 +21,15 @@ using namespace dzhyun;
 const unsigned int ADDRESS_MAX_LENGTH = 64;
 const unsigned int MESSAGE_MAX_LENGTH = 1024;
 const unsigned int REQUEST_TIMEOUT = 1000;
-const unsigned int REPLAY_WAIT_TIMEOUT = 20;
+const unsigned int REPLAY_WAIT_TIMEOUT = 5;
 
 struct addr_data
 {
 	std::string addr;
 	unsigned int addr_length;
 	unsigned int ServerNo;
-	unsigned int requestID;
+	long time;
+	unsigned __int64 requestID;
 	vector<string> ServiceName_vector;
 };
 
@@ -39,18 +40,28 @@ struct request_string_data
 	unsigned int serviceName_cnt;
 };
 
-typedef map<string, addr_data> addr_map;
+
 typedef pair<string, addr_data> addr_pair;
-typedef map<unsigned int, addr_pair> serverNo_map;
-typedef map<string, map<string, addr_data>> service_Name_map;
-typedef pair<string, unsigned int> requestID_pair;
+typedef pair<string, unsigned __int64> requestID_pair;
+typedef pair<long, unsigned __int64> timer_pair;
+
+struct reset_timer_data
+{
+	requestID_pair req_requestID_pair;
+	unsigned int times;
+};
+
+typedef map<string, addr_data> addr_map;
 typedef map<requestID_pair, addr_pair> requestID_map;
-typedef multimap<long, requestID_pair> timer_map;
+typedef map<string, map<string, addr_data>> service_Name_map;
+typedef multimap<timer_pair, reset_timer_data> timer_map;
+
+//typedef map<unsigned __int64, addr_pair> serverNo_map;
 
 class bus_router
 {
 	addr_map addr_map_;
-	serverNo_map serverNo_map_;
+	//serverNo_map serverNo_map_;
 	service_Name_map service_Name_map_;   
 	requestID_map requestID_map_;   //管理应答dealer的地址和router的requestID
 	timer_map timer_map_;
@@ -61,7 +72,9 @@ class bus_router
 
 	unsigned int addr_length_;
 	unsigned int msg_length_;
-	unsigned int requestID_;
+	unsigned __int64 requestID_;
+
+	long time_;
 
 public:
 	bus_router();
@@ -76,18 +89,22 @@ private:
 	void router_logoutReq(BusHead* bus);
 	void router_logoutRsp(BusHead* bus);
 	void router_other_dealer(BusHead* bus);
+	void reset_map(BusHead* bus);
 
 	void send_msg(void* addr, unsigned int addr_len, void* msg, unsigned int msg_len);
 	void send_msg(void* addr, unsigned int addr_len, BusHead* bus);
 	void send_error_msg_back(BusHead* bus, char* msg);
 	
 	int find_address_map(char* addr);
+	int compare_addr(service_Name_map::iterator iter_servieName);
 
-	void add_requestID_map(string addr, unsigned int requestID);
+	void add_requestID_map(string addr, unsigned __int64 requestID);
 	void recycling_watcher();
-
+	
 	void split_command(std::string str, request_string_data& rd);
 	void split_anyreq(std::string str, request_string_data& rd);
+
+	void clear();
 
 	void print_map();
 };
