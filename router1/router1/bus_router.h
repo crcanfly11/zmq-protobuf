@@ -19,8 +19,9 @@ using namespace protobuf;
 using namespace dzhyun;
 
 const unsigned int ADDRESS_MAX_LENGTH = 64;
-const unsigned int MESSAGE_MAX_LENGTH = 1024;
+const unsigned int MESSAGE_MAX_LENGTH = 1024*1024*1024;
 const unsigned int REQUEST_TIMEOUT = 1000;
+const unsigned int HEARTBEAT_TIMEOUT = 3600;
 const unsigned int REPLAY_WAIT_TIMEOUT = 5;
 
 struct addr_data
@@ -28,7 +29,8 @@ struct addr_data
 	std::string addr;
 	unsigned int addr_length;
 	unsigned int ServerNo;
-	long time;
+	long reset_time;
+	long alive_time;
 	unsigned __int64 requestID;
 	vector<string> ServiceName_vector;
 };
@@ -44,6 +46,7 @@ struct request_string_data
 typedef pair<string, addr_data> addr_pair;
 typedef pair<string, unsigned __int64> requestID_pair;
 typedef pair<long, unsigned __int64> timer_pair;
+typedef pair<long, string> heartbeat_pair;
 
 struct reset_timer_data
 {
@@ -52,15 +55,17 @@ struct reset_timer_data
 };
 
 typedef map<string, addr_data> addr_map;
+typedef map<heartbeat_pair, string> heartbeat_map;
 typedef map<requestID_pair, addr_pair> requestID_map;
-typedef map<string, map<string, addr_data>> service_Name_map;
-typedef multimap<timer_pair, reset_timer_data> timer_map;
+typedef map<string, addr_map> service_Name_map;
+typedef map<timer_pair, reset_timer_data> timer_map;
 
 //typedef map<unsigned __int64, addr_pair> serverNo_map;
 
 class bus_router
 {
 	addr_map addr_map_;
+	heartbeat_map heartbeat_map_;
 	//serverNo_map serverNo_map_;
 	service_Name_map service_Name_map_;   
 	requestID_map requestID_map_;   //管理应答dealer的地址和router的requestID
@@ -88,7 +93,10 @@ private:
 	void router_loginRsp(BusHead* bus, request_string_data* rd);
 	void router_logoutReq(BusHead* bus);
 	void router_logoutRsp(BusHead* bus);
+	void router_heartbeatReq(BusHead* bus);
+	void router_heartbeatRsp(BusHead* bus);
 	void router_other_dealer(BusHead* bus);
+	void router_timeoutRsp(addr_pair& pair);
 	void reset_map(BusHead* bus);
 
 	void send_msg(void* addr, unsigned int addr_len, void* msg, unsigned int msg_len);
@@ -100,6 +108,7 @@ private:
 
 	void add_requestID_map(string addr, unsigned __int64 requestID);
 	void recycling_watcher();
+	void recycling_heartbeat();
 	
 	void split_command(std::string str, request_string_data& rd);
 	void split_anyreq(std::string str, request_string_data& rd);

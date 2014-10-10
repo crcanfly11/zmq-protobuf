@@ -1,11 +1,11 @@
 #include "bus_router.h"
 
-bus_router::bus_router() : router_socket_(NULL), addr_length_(0), msg_length_(0), requestID_(0)
+bus_router::bus_router() : router_socket_(NULL), addr_length_(0), msg_length_(0), requestID_(0), time_(0)
 {
 	p_addr_ = NULL; p_msg_ = NULL;
 };
 
-bus_router::bus_router(void* socket) : router_socket_(socket), addr_length_(0), msg_length_(0), requestID_(0)
+bus_router::bus_router(void* socket) : router_socket_(socket), addr_length_(0), msg_length_(0), requestID_(0), time_(0)
 {
 	p_addr_ = NULL; p_msg_ = NULL;
 };
@@ -42,7 +42,7 @@ void bus_router::run()
 			msg_length_ = zmq_recv(router_socket_, p_msg_, MESSAGE_MAX_LENGTH, 0);
 
 			p_addr_[addr_length_] = 0;
-			p_msg_[msg_length_] = 0;
+			p_msg_[msg_length_] = 0;		
 
 			BusHead bus;
 			bus.ParseFromArray(p_msg_, msg_length_);
@@ -73,6 +73,9 @@ void bus_router::run()
 				case 11:
 					reset_map(&bus);
 					break;
+				case 88:
+					router_heartbeatReq(&bus);
+					break;
 				default:
 					router_other_dealer(&bus);
 					break;
@@ -91,93 +94,10 @@ void bus_router::run()
 		long tm = (long)time(NULL);
 		if(tm > time_) {
 			recycling_watcher();
+			recycling_heartbeat();
 			time_ = tm;
 		}
 	}	
-};
-
-void bus_router::reset_map(BusHead* bus)
-{
-	clear();
-
-	RspInfo rsp;
-	rsp.set_rspno(0);
-	char* msg("clear succeed");
-	rsp.set_rspdesc(msg, strlen(msg));
-
-	std::string rsp_str;
-	rsp.SerializeToString(&rsp_str);
-
-	BusHead bh;
-	bh.set_servicename("reply/bus/rspinfo");
-	bh.set_requestid(bus->requestid());
-	bh.set_allocated_data(&rsp_str);
-	
-	int bh_size = bh.ByteSize();
-	void* bh_buf = malloc(bh_size);
-	bh.SerializeToArray(bh_buf, bh_size);	
-	send_msg(p_addr_, addr_length_, bh_buf, bh_size);
-
-	free(bh_buf);	
-	bh.release_data();
-	bh.release_servicename();
-	rsp.release_rspdesc();
-};
-
-void bus_router::split_command(std::string str, request_string_data& rd)
-{
-	if(strncmp((char*)str.substr(0,3).c_str(), "bus", 3) != 0) {
-		rd.command_id = 0;
-		return;
-	}
-
-	if(str.find("login") != string::npos)
-		rd.command_id = 1;
-	else if(str.find("logout") != string::npos)
-		rd.command_id = 3;
-	else if(str.find("clear") != string::npos)
-		rd.command_id = 11;
-	else 
-		rd.command_id = 0;
-};
-
-void bus_router::split_anyreq(std::string str, request_string_data& rd)
-{
-	int idx_split = str.find("?");
-	if(idx_split == string::npos) { 
-		rd.serviceName_cnt = 0;
-		return;
-	}
-
-	rd.serviceName_vec.clear();
-
-	int idx_comma_begin = str.find("=", idx_split);
-	int idx_comma_end = str.find(",", idx_comma_begin);
-
-	if(idx_comma_end == string::npos) {
-		string str_only = &str[idx_comma_begin+1];
-		if(!str_only.empty())
-			rd.serviceName_vec.push_back(str_only);	
-	}
-	else {
-		if(idx_comma_begin != string::npos) {
-			rd.serviceName_vec.push_back(str.substr(idx_comma_begin+1, idx_comma_end-idx_comma_begin-1));	
-			idx_comma_begin = idx_comma_end;
-			while(1) {
-				idx_comma_end = str.find(",", idx_comma_begin+1);
-				if(idx_comma_begin != string::npos) {
-					rd.serviceName_vec.push_back(str.substr(idx_comma_begin+1, idx_comma_end-idx_comma_begin-1));	
-					idx_comma_begin = idx_comma_end;
-				}
-				else 
-					break;
-			}
-		}	
-	}
-	
-	rd.serviceName_cnt = rd.serviceName_vec.size();	
-
-	return;
 };
 
 void bus_router::print_map()
@@ -207,12 +127,28 @@ void bus_router::print_map()
 
 void bus_router::router_loginReq(BusHead* bus, request_string_data* rd)
 {
+	//debug code
+	cout<< "--------------address map size--------------"<< endl;
+	cout<< addr_map_.size()<< endl;
+	cout<< "--------------addr map content--------------"<< endl;
+	addr_map::iterator iter_print = addr_map_.begin();
+	for(;iter_print!=addr_map_.end();++iter_print) {
+		cout<< iter_print->first<< endl;
+	}	
+
+	cout<< "--------------find address--------------"<< endl;
+	cout<< p_addr_<< endl;
+	
+
 	AnyReq loginReq;
 	loginReq.ParseFromString(bus->data());
+	
+	cout<< "router_loginReq, id:"<< bus->requestid()<< endl;
 
 	if(!find_address_map(p_addr_)) {
-		send_error_msg_back(bus, "already logined.");
-		return;
+		//send_error_msg_back(bus, "already logined.");
+		//return;
+		router_loginRsp(bus, rd);
 	}
 	
 	split_anyreq(loginReq.url(), *rd);
@@ -220,6 +156,7 @@ void bus_router::router_loginReq(BusHead* bus, request_string_data* rd)
 	adt.addr.assign(p_addr_, addr_length_);
 	adt.addr_length = addr_length_;
 	adt.ServerNo = 0;
+	adt.alive_time = (long)time(NULL)+HEARTBEAT_TIMEOUT+2;
 	//adt.ServerNo = loginReq.serverno();
 	
 	unsigned int size = rd->serviceName_cnt;
@@ -229,6 +166,13 @@ void bus_router::router_loginReq(BusHead* bus, request_string_data* rd)
 
 	//add address
 	addr_map_.insert(addr_pair(string(p_addr_, addr_length_),adt));
+
+	//set heartbeat
+	heartbeat_pair hp(adt.alive_time, string(p_addr_, addr_length_));
+	heartbeat_map_.insert(pair<heartbeat_pair, string>(hp, string(p_addr_, addr_length_)));
+
+	//cout<< "add size: "<< addr_map_.size()<< endl;
+	//cout<< "heartbeat size: "<< heartbeat_map_.size()<< endl;
 
 	//业务逻辑未确定
 	//serverNo_map_.insert(pair<unsigned int, addr_pair>(adt.ServerNo, addr_pair(p_addr_,adt)));
@@ -301,6 +245,8 @@ void bus_router::router_logoutReq(BusHead* bus)
 		return;
 	}
 
+	cout<< "router_logoutReq, id:"<< bus->requestid()<< endl;
+
 	vector<string> lgout_serviceName_vec = iter_addr_map->second.ServiceName_vector;
 	int size = lgout_serviceName_vec.size();
 	for(int i=0;i<size;++i) {
@@ -323,6 +269,14 @@ void bus_router::router_logoutReq(BusHead* bus)
 			}		
 		}
 	}
+
+	heartbeat_pair hp(iter_addr_map->second.alive_time, string(p_addr_, addr_length_));
+	heartbeat_map::iterator iter_heartbeat = heartbeat_map_.find(hp);
+	if(iter_heartbeat != heartbeat_map_.end()) {
+		heartbeat_map_.erase(iter_heartbeat);
+	}
+
+	addr_map_.erase(iter_addr_map);
 
 	router_logoutRsp(bus);
 };
@@ -357,14 +311,58 @@ void bus_router::router_logoutRsp(BusHead* bus)
 	lgout_rsp.release_rspinfo();
 };
 
-int bus_router::compare_addr(service_Name_map::iterator iter_servieName)
+void bus_router::router_heartbeatReq(BusHead* bus)
 {
-	map<string, addr_data>::iterator iter_string = iter_servieName->second.begin();
-	for(;iter_string != iter_servieName->second.end();++iter_string) {
-		if(memcmp(p_addr_, iter_string->second.addr.c_str(), iter_string->second.addr_length) == 0)
-			return -1;
+	addr_map::iterator iter_addr_map = addr_map_.find(string(p_addr_, addr_length_));
+
+	//unregistered addr do nothing
+	if(iter_addr_map == addr_map_.end())
+		return;  
+
+	addr_data ad = iter_addr_map->second; 
+	heartbeat_map::iterator iter_heartbeat = heartbeat_map_.find(heartbeat_pair(ad.alive_time, string(p_addr_, addr_length_)));
+	if(iter_heartbeat == heartbeat_map_.end()) {
+		//doing something
+		return;
 	}
-	return 0;
+
+	long tm = (long)time(NULL)+HEARTBEAT_TIMEOUT+2;
+
+	heartbeat_map_.erase(iter_heartbeat);
+	heartbeat_pair hp(tm, string(p_addr_, addr_length_));
+	heartbeat_map_.insert(pair<heartbeat_pair, string>(hp, string(p_addr_, addr_length_)));
+
+	iter_addr_map->second.alive_time = tm;
+
+	//heartbeat rsp
+	router_heartbeatRsp(bus);
+};
+
+void bus_router::router_heartbeatRsp(BusHead* bus)
+{
+	//send rsp
+	RspInfo rsp;
+	rsp.set_rspno(0);
+	std::string str = "heartbeat response.";
+	rsp.set_allocated_rspdesc(&str);
+
+	string heartbeat_rsp_str;
+	rsp.SerializeToString(&heartbeat_rsp_str);
+
+	BusHead bh;
+	bh.set_servicename("reply/bus/ping");
+	bh.set_requestid(bus->requestid());
+	bh.set_allocated_data(&heartbeat_rsp_str);
+	
+	int bh_size = bh.ByteSize();
+	void* bh_buf = malloc(bh_size);
+	bh.SerializeToArray(bh_buf, bh_size);	
+	send_msg(p_addr_, addr_length_, bh_buf, bh_size);
+
+	free(bh_buf);	
+	bh.release_data();
+	bh.release_servicename();
+	rsp.release_rspdesc();
 };
 
 void bus_router::router_other_dealer(BusHead* bus)
@@ -408,36 +406,12 @@ void bus_router::router_other_dealer(BusHead* bus)
 			requestID_map_.erase(iter_requestID);
 		else {
 			//reset timer 
-			timer_map::iterator iter_timer = timer_map_.find(timer_pair(iter_requestID->second.second.time, iter_requestID->first.second));
+			timer_map::iterator iter_timer = timer_map_.find(timer_pair(iter_requestID->second.second.reset_time, iter_requestID->first.second));
 			if(iter_timer != timer_map_.end()) {
 				iter_timer->second.times = iter_timer->second.times + 1;
 			}
 		}
 	}
-};
-
-void bus_router::add_requestID_map(string addr, unsigned __int64 requestID)
-{
-	++requestID_;
-	long tm = (long)time(NULL)+REPLAY_WAIT_TIMEOUT;
-
-	requestID_pair req_requestID(addr, requestID_);
-
-	addr_data ad;
-	ad.addr_length = addr_length_;
-	ad.requestID = requestID;
-	ad.time = tm;
-	addr_pair req_addr(string(p_addr_, addr_length_), ad);
-
-	requestID_map_.insert(pair<requestID_pair, addr_pair>(req_requestID, req_addr));
-
-    //add timer map
-	reset_timer_data rtd;
-	rtd.req_requestID_pair = req_requestID;
-	rtd.times = 0;
-
-	timer_pair pf(tm, requestID_);
-    timer_map_.insert(pair<timer_pair, reset_timer_data>(pf, rtd));
 };
 
 void bus_router::send_msg(void* addr, unsigned int addr_len, void* msg, unsigned int msg_len)
@@ -482,26 +456,6 @@ void bus_router::send_error_msg_back(BusHead* bus, char* msg)
 	rsp.release_rspdesc();
 };
 
-int bus_router::find_address_map(char* addr)
-{
-	cout<< "--------------address map size--------------"<< endl;
-	cout<< addr_map_.size()<< endl;
-	cout<< "--------------addr map content--------------"<< endl;
-	addr_map::iterator iter_print = addr_map_.begin();
-	for(;iter_print!=addr_map_.end();++iter_print) {
-		cout<< iter_print->first<< endl;
-	}	
-
-	cout<< "--------------find address--------------"<< endl;
-	cout<< addr<< endl;
-
-	addr_map::iterator iter_addr_map = addr_map_.find(addr);
-	if(iter_addr_map == addr_map_.end())
-		return -1;
-
-	return 0;
-};
-
 void bus_router::recycling_watcher()
 {
 	if(timer_map_.empty()) return;
@@ -522,37 +476,84 @@ void bus_router::recycling_watcher()
 			continue;
 		}
 
-		addr_pair rep_addr = iter_request->second;
-		
-		BusHead rep_bh;
-		rep_bh.set_servicename("reply/bus/rspinfo");
-		rep_bh.set_requestid(rep_addr.second.requestID);
-
-		std::string str("replay time out.");
-		RspInfo rsp;
-		rsp.set_rspno(-1);
-		rsp.set_allocated_rspdesc(&str);
-
-		std::string rsp_str;
-		rsp.SerializeToString(&rsp_str);
-
-		rep_bh.set_allocated_data(&rsp_str);
-
-		int bh_size = rep_bh.ByteSize();
-		void* bh_buf = malloc(bh_size);
-		rep_bh.SerializeToArray(bh_buf, bh_size);	
-
-		send_msg((void*)rep_addr.first.c_str(), rep_addr.second.addr_length, bh_buf, bh_size);		
-	
-		free(bh_buf);	
-		rsp.release_rspdesc();
-		rep_bh.release_data();
-		rep_bh.release_servicename();
+		router_timeoutRsp(iter_request->second);
 
 		timer_map::iterator iter_timer_erase = iter_timer++;
 		timer_map_.erase(iter_timer_erase);
 
 		requestID_map_.erase(iter_request);
+	}
+};
+
+void bus_router::router_timeoutRsp(addr_pair& pair)
+{
+	BusHead rep_bh;
+	rep_bh.set_servicename("reply/bus/rspinfo");
+	rep_bh.set_requestid(pair.second.requestID);
+
+	std::string str;
+	addr_map::iterator iter_addr = addr_map_.find(pair.first);
+	if(iter_addr == addr_map_.end()) {
+		str = "lost connect with app";
+	}
+	else 
+		str = "replay time out.";
+
+	RspInfo rsp;
+	rsp.set_rspno(-1);
+	rsp.set_allocated_rspdesc(&str);
+
+	std::string rsp_str;
+	rsp.SerializeToString(&rsp_str);
+
+	rep_bh.set_allocated_data(&rsp_str);
+
+	int bh_size = rep_bh.ByteSize();
+	void* bh_buf = malloc(bh_size);
+	rep_bh.SerializeToArray(bh_buf, bh_size);	
+
+	send_msg((void*)pair.first.c_str(), pair.second.addr_length, bh_buf, bh_size);		
+	
+	free(bh_buf);	
+	rsp.release_rspdesc();
+	rep_bh.release_data();
+	rep_bh.release_servicename();
+};
+
+void bus_router::recycling_heartbeat()
+{
+	long tm = (long)time(NULL);
+	heartbeat_map::iterator iter_heartbeat = heartbeat_map_.begin();
+	for(;iter_heartbeat != heartbeat_map_.end();) {
+		if(tm < iter_heartbeat->first.first)
+			return;
+		else {
+			heartbeat_map::iterator iter = iter_heartbeat++;
+			addr_map::iterator iter_addr = addr_map_.find(iter->second);
+			if(iter_addr != addr_map_.end()) {
+				int service_size = iter_addr->second.ServiceName_vector.size();
+				for(int i=0;i < service_size;++i) {
+					service_Name_map::iterator iter_service_name = service_Name_map_.find(iter_addr->second.ServiceName_vector[i]);
+					if(iter_service_name != service_Name_map_.end()) {
+						if(iter_service_name->second.size() == 1) {
+							service_Name_map_.erase(iter_service_name);
+						}
+						else {
+							addr_map::iterator iter_erase = iter_service_name->second.find(iter->second);
+							if(iter_erase != iter_service_name->second.end()) {
+								iter_service_name->second.erase(iter_erase);
+							}
+						}
+					}
+				}
+			}
+
+			addr_map_.erase(iter->second);
+			heartbeat_map_.erase(iter);
+
+			//cout<< "erase add size: "<< addr_map_.size()<< endl;
+			//cout<< "erase heartbeat size: "<< heartbeat_map_.size()<< endl;
+		}
 	}
 };
 
@@ -566,6 +567,7 @@ void bus_router::clear()
 		}
 	}
 	addr_map_.clear();
+	heartbeat_map_.clear();
 
 	service_Name_map::iterator iter_service_Name_map = service_Name_map_.begin();
 	for(; iter_service_Name_map != service_Name_map_.end(); ++iter_service_Name_map) {
@@ -585,4 +587,133 @@ void bus_router::clear()
 	} 
 	requestID_map_.clear();
 	timer_map_.clear();
+};
+
+void bus_router::reset_map(BusHead* bus)
+{
+	clear();
+
+	RspInfo rsp;
+	rsp.set_rspno(0);
+	char* msg("clear succeed");
+	rsp.set_rspdesc(msg, strlen(msg));
+
+	std::string rsp_str;
+	rsp.SerializeToString(&rsp_str);
+
+	BusHead bh;
+	bh.set_servicename("reply/bus/rspinfo");
+	bh.set_requestid(bus->requestid());
+	bh.set_allocated_data(&rsp_str);
+	
+	int bh_size = bh.ByteSize();
+	void* bh_buf = malloc(bh_size);
+	bh.SerializeToArray(bh_buf, bh_size);	
+	send_msg(p_addr_, addr_length_, bh_buf, bh_size);
+
+	free(bh_buf);	
+	bh.release_data();
+	bh.release_servicename();
+	rsp.release_rspdesc();
+};
+
+void bus_router::split_command(std::string str, request_string_data& rd)
+{
+	if(strncmp((char*)str.substr(0,3).c_str(), "bus", 3) != 0) {
+		rd.command_id = 0;
+		return;
+	}
+
+	if(str.find("login") != string::npos)
+		rd.command_id = 1;
+	else if(str.find("logout") != string::npos)
+		rd.command_id = 3;
+	else if(str.find("clear") != string::npos)
+		rd.command_id = 11;
+	else if(str.find("ping") != string::npos)
+		rd.command_id = 88;
+	else 
+		rd.command_id = 0;
+};
+
+void bus_router::split_anyreq(std::string str, request_string_data& rd)
+{
+	int idx_split = str.find("?");
+	if(idx_split == string::npos) { 
+		rd.serviceName_cnt = 0;
+		return;
+	}
+
+	rd.serviceName_vec.clear();
+
+	int idx_comma_begin = str.find("=", idx_split);
+	int idx_comma_end = str.find(",", idx_comma_begin);
+
+	if(idx_comma_end == string::npos) {
+		string str_only = &str[idx_comma_begin+1];
+		if(!str_only.empty())
+			rd.serviceName_vec.push_back(str_only);	
+	}
+	else {
+		if(idx_comma_begin != string::npos) {
+			rd.serviceName_vec.push_back(str.substr(idx_comma_begin+1, idx_comma_end-idx_comma_begin-1));	
+			idx_comma_begin = idx_comma_end;
+			while(1) {
+				idx_comma_end = str.find(",", idx_comma_begin+1);
+				if(idx_comma_begin != string::npos) {
+					rd.serviceName_vec.push_back(str.substr(idx_comma_begin+1, idx_comma_end-idx_comma_begin-1));	
+					idx_comma_begin = idx_comma_end;
+				}
+				else 
+					break;
+			}
+		}	
+	}
+	
+	rd.serviceName_cnt = rd.serviceName_vec.size();	
+
+	return;
+};
+
+int bus_router::compare_addr(service_Name_map::iterator iter_servieName)
+{
+	map<string, addr_data>::iterator iter_string = iter_servieName->second.begin();
+	for(;iter_string != iter_servieName->second.end();++iter_string) {
+		if(memcmp(p_addr_, iter_string->second.addr.c_str(), iter_string->second.addr_length) == 0)
+			return -1;
+	}
+	return 0;
+};
+
+void bus_router::add_requestID_map(string addr, unsigned __int64 requestID)
+{
+	++requestID_;
+	long tm = (long)time(NULL)+REPLAY_WAIT_TIMEOUT;
+
+	requestID_pair req_requestID(addr, requestID_);
+
+	addr_data ad;
+	ad.addr_length = addr_length_;
+	ad.requestID = requestID;
+	ad.reset_time = tm;
+	addr_pair req_addr(string(p_addr_, addr_length_), ad);
+
+	requestID_map_.insert(pair<requestID_pair, addr_pair>(req_requestID, req_addr));
+
+    //add timer map
+	reset_timer_data rtd;
+	rtd.req_requestID_pair = req_requestID;
+	rtd.times = 0;
+
+	timer_pair pf(tm, requestID_);
+    timer_map_.insert(pair<timer_pair, reset_timer_data>(pf, rtd));
+};
+
+int bus_router::find_address_map(char* addr)
+{
+	addr_map::iterator iter_addr_map = addr_map_.find(addr);
+	if(iter_addr_map == addr_map_.end())
+		return -1;
+
+	return 0;
 };

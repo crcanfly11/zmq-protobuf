@@ -73,19 +73,24 @@ void split_commond(std::string str, request_string_data& rd)
 		rd.command_id = 1;
 	else if(str.find("reply/bus/logout") != string::npos)
 		rd.command_id = 2;
+	else if(str.find("reply/bus/ping") != string::npos)
+		rd.command_id = 88;
 	else 
 		rd.command_id = 0;
 };
 
 int main(int argc, char *argv[])
 {
+	long time_ = 0;
+	long times = 0;
+
 	void *context = zmq_init(1);
 	void *dealer = zmq_socket (context, ZMQ_DEALER);
 	//zmq_setsockopt(dealer, ZMQ_IDENTITY, "dealer", 7);
 
 	int err;
-	//if(err = zmq_connect(dealer, "tcp://10.15.89.122:36000") == 0)
-	if(err = zmq_connect(dealer, "tcp://localhost:36000") == 0)
+	if(err = zmq_connect(dealer, "tcp://10.15.89.122:36000") == 0)
+	//if(err = zmq_connect(dealer, "tcp://localhost:36000") == 0)
 		cout<< "connected."<< endl;
 	else 
 		bind_error(err);
@@ -148,31 +153,88 @@ int main(int argc, char *argv[])
 
 	cout<< "--------begin server--------"<< endl;
 	while(1) {
-		memset(msg, 0x00, sizeof(msg));
-		int size1 = zmq_recv(dealer,msg,sizeof(msg), 0);
-		dzh_bus_interface::Bus_Head bh;
-		bh.ParseFromArray(msg, size1);
-
-		if(strcmp(bh.servicename().c_str(), "a") == 0) {
-			bh.set_endflag(11111);
+		zmq_pollitem_t items [] = { { dealer, 0, ZMQ_POLLIN, 0 } };  
+		int rc = zmq_poll (items, 1, 1000);  
+		if (rc == -1) {
+			break; // Interrupted  
 		}
-		else if(strcmp(bh.servicename().c_str(), "b") == 0) {
-			bh.set_endflag(22222);
+		if (items [0].revents & ZMQ_POLLIN) { 
+			memset(msg, 0x00, sizeof(msg));
+			int size1 = zmq_recv(dealer,msg,sizeof(msg), 0);
+			dzh_bus_interface::Bus_Head bh;
+			bh.ParseFromArray(msg, size1);
+
+			if(strcmp(bh.servicename().c_str(), "a") == 0) {
+				bh.set_endflag(0);
+			}
+			else if(strcmp(bh.servicename().c_str(), "b") == 0) {
+				bh.set_endflag(0);
+			}
+			else if(strcmp(bh.servicename().c_str(), "c") == 0) {
+				bh.set_endflag(0);
+			}
+			else {
+				dzh_bus_interface::RspInfo rsp;
+				rsp.ParseFromString(bh.data());
+				cout<< "error:"<< rsp.rspdesc()<< endl;
+			}
+
+			memset(msg, 0x00, sizeof(msg));
+			int buf_si = bh.ByteSize();
+			bh.SerializeToArray(msg, buf_si);
+
+			//Sleep(2000);
+			zmq_send(dealer, msg, buf_si, 0);
+			//Sleep(2000);
+			//zmq_send(dealer, msg, buf_si, 0);
+			//Sleep(12000);
+			//zmq_send(dealer, msg, buf_si, 0);
+
+			cout<< "send end flag rep:"<< bh.endflag()<< endl;
+
+			bh.release_data();
+			bh.release_servicename();
 		}
-		else if(strcmp(bh.servicename().c_str(), "c") == 0) {
-			bh.set_endflag(33333);
+		long tm = (long)time(NULL);
+		if(tm > time_) {
+			dzh_bus_interface::Bus_Head bh;
+			bh.set_servicename("bus/ping");
+			bh.set_requestid(++times);
+			
+			int bh_size = bh.ByteSize();
+			char* bh_buf = new char[bh_size];
+			memset(bh_buf, 0x00, bh_size);
+			bh.SerializeToArray(bh_buf, bh_size);
+	
+			zmq_send(dealer, bh_buf, bh_size, 0);
+
+			//cout<< "send heart beat"<< endl;
+
+			memset(msg, 0x00, sizeof(msg));
+			int size1 = zmq_recv(dealer,msg,sizeof(msg), 0);
+
+			dzh_bus_interface::Bus_Head rep_bh;
+			rep_bh.ParseFromArray(msg, recv_size);
+
+			request_string_data rd;
+			split_commond(rep_bh.servicename(), rd);
+
+			if(rd.command_id == 88) {
+				dzh_bus_interface::RspInfo lgin_rsp;
+				lgin_rsp.ParseFromString(rep_bh.data());
+				//cout<< "recv login rsp msg:"<< lgin_rsp.rspdesc()<< endl;
+				lgin_rsp.release_rspdesc();
+			}
+			else {
+				dzh_bus_interface::RspInfo rspinfo;
+				rspinfo.ParseFromString(rep_bh.data());
+				cout<< "recv error msg:"<< rspinfo.rspdesc()<< endl;
+				rspinfo.release_rspdesc();
+			}
+			rep_bh.release_data();	
+
+			time_ = tm+10;
 		}
-
-		memset(msg, 0x00, sizeof(msg));
-		int buf_si = bh.ByteSize();
-		bh.SerializeToArray(msg, buf_si);
-
-		zmq_send(dealer, msg, buf_si, 0);
-
-		cout<< "send end flag rep:"<< bh.endflag()<< endl;
-
-		bh.release_data();
-		bh.release_servicename();
 	}
 
 	cout<< "---------end----------"<< endl;

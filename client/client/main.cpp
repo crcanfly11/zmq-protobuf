@@ -14,7 +14,7 @@
 using namespace std;
 using namespace google;
 using namespace protobuf;
-//
+
 //int main (int argc, char *argv[])
 //{
 //    void *context = zmq_init (1);
@@ -22,32 +22,31 @@ using namespace protobuf;
 //    //  连接至服务端的套接字
 //    printf ("正在连接至服务端...\n");
 //    void *requester = zmq_socket (context, ZMQ_DEALER);  
-//	zmq_setsockopt(requester, ZMQ_IDENTITY, "client1", 7);
+//	zmq_setsockopt(requester, ZMQ_IDENTITY, "dealer1", 7);
 //
 //	int err;
-//	if(err = zmq_connect(requester, "tcp://localhost:11523") == 0)
+//	if(err = zmq_connect(requester, "tcp://localhost:15558") == 0)
 //		cout<< "connect succeed."<< endl;
 //	else
 //		connect_error(err);
-//
-//	char* msg = new char[128];
 //	
 //	while(1) {
-//		memset(msg, 0x00, 128);
 //
-//		int send_msg_len = zmq_send(requester, "asdfasdf", 8, 0);
-//		send_error(send_msg_len);
-//		cout<< "send msg:"<< msg<< ", send msg len:"<< send_msg_len<< endl;
+//		srand((unsigned int)time(NULL));
+//		int data = rand()%1000;
+//		char buf[4];
+//		sprintf(buf, "%d", data);
+//		buf[3] = 0;
+//		zmq_send(requester, buf, 3, 0);
+//		cout<< "send buf:"<< buf<< endl;
 //
-//		memset(msg, 0x00, 128);
-//		int recv_msg_len = zmq_recv(requester, msg, 128, 0);
-//		recv_error(recv_msg_len);
-//		cout<< "recv msg:"<< msg<< ", recv msg len:"<< recv_msg_len<< endl;
-//		cout<< "-----------------------------------"<< endl;
-//		Sleep(500);
+//		char msg[1024];
+//		int recv_size = zmq_recv(requester,msg,1024, 0);
+//		msg[recv_size] = 0;
+//
+//		cout<< "recv :"<< msg<< endl;
+//		Sleep(1000);
 //	}
-//
-//	delete[] msg;
 //
 //	system("pause");
 //
@@ -83,8 +82,8 @@ int main (int argc, char *argv[])
 	//zmq_setsockopt(requester, ZMQ_IDENTITY, "ch1", 3);
 
 	int err;
-	//if(err = zmq_connect(requester, "tcp://10.15.89.122:36000") == 0)
-	if(err = zmq_connect(requester, "tcp://localhost:36000") == 0)
+	if(err = zmq_connect(requester, "tcp://10.15.89.122:36000") == 0)
+	//if(err = zmq_connect(requester, "tcp://localhost:36000") == 0)
 		cout<< "connect succeed."<< endl;
 	else
 		connect_error(err);
@@ -166,26 +165,29 @@ int main (int argc, char *argv[])
 	bhreq.release_data();
 
 	//应答
-	cout<< "------ recving 100 rep`````-------"<< endl;
-	memset(msg, 0x00, sizeof(msg));
-	int recv_size100 = zmq_recv(requester,msg,1024, 0);
-	dzh_bus_interface::Bus_Head rep_bh100;
-	rep_bh100.ParseFromArray(msg, recv_size100);
+	//while(1) {
+		cout<< "------ recving 100 rep`````-------"<< endl;
+		memset(msg, 0x00, sizeof(msg));
+		int recv_size100 = zmq_recv(requester,msg,1024, 0);
+		dzh_bus_interface::Bus_Head rep_bh100;
+		rep_bh100.ParseFromArray(msg, recv_size100);
 
-	if(strcmp(rep_bh100.servicename().c_str(), "a") == 0) 
-		cout<< "recv a:"<< rep_bh100.endflag()<< endl;
-	else if(strcmp(rep_bh100.servicename().c_str(), "b") == 0) 
-		cout<< "recv b:"<< rep_bh100.endflag()<< endl;
-	else if(strcmp(rep_bh100.servicename().c_str(), "c") == 0) 
-		cout<< "recv c:"<< rep_bh100.endflag()<< endl;
-	else {
-		dzh_bus_interface::RspInfo rsp;
-		rsp.ParseFromString(rep_bh100.data());	
-		cout<< "error:"<< rsp.rspdesc()<< endl;
-	}
+		if(strcmp(rep_bh100.servicename().c_str(), "a") == 0) 
+			cout<< "recv a:"<< rep_bh100.endflag()<< endl;
+		else if(strcmp(rep_bh100.servicename().c_str(), "b") == 0) 
+			cout<< "recv b:"<< rep_bh100.endflag()<< endl;
+		else if(strcmp(rep_bh100.servicename().c_str(), "c") == 0) 
+			cout<< "recv c:"<< rep_bh100.endflag()<< endl;
+		else {
+			dzh_bus_interface::RspInfo rsp;
+			rsp.ParseFromString(rep_bh100.data());	
+			cout<< "error:"<< rsp.rspdesc()<< endl;
+			//break;
+		}
 
-	rep_bh100.release_data();	
-	
+		rep_bh100.release_data();	
+	//}
+
 	cout<< "-------end--------"<< endl;
 
     zmq_close (requester);
@@ -196,6 +198,7 @@ int main (int argc, char *argv[])
     return 0;
 }
 
+////ZMQ_REQ 模式测试程序
 //int main (void)
 //{
 //    void *context = zmq_init (1);
@@ -206,10 +209,10 @@ int main (int argc, char *argv[])
 //	zmq_setsockopt(requester, ZMQ_IDENTITY, "ch1", 3);
 //
 //	int err;
-//	if(err = zmq_connect(requester, "tcp://localhost:15555") == 0)
+//	if(err = zmq_connect(requester, "tcp://10.15.89.122:15557") == 0)
 //		cout<< "connect succeed."<< endl;
-//	else
-//		error_print(err);
+//	else 
+//		cout<< "connect error."<< endl;
 //
 //	char* send = "hello1234567";
 //	s_send_msg(requester, send);
