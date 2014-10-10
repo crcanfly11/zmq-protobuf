@@ -1,0 +1,4 @@
+<?xml version="1.0" ?>
+<config>
+   <cfg logdir = "/home/jcr/bus_router/log/" msgmaxlen = "1024" endpoint="tcp://*:36000" name="router1" subpoint="tcp://*:36001" pubpoint="tcp://*:36002" replyouttime = "20" heartbeatouttime = "3600" zookeeperhost = "10.15.107.245:2181,10.15.107.246:2181,10.15.107.71:2181" zookeepertimeout = "30000"  idc = "1" businesspath = "/root/bus_router" appinterface = "pub:tch://10.15.89.122:36000 sub:tcp://10.15.89.122:36001 pub:tcp://10.15.89.122:36002" nodepath = "/root_status/fcm/apphub_router1" />
+</config>
