@@ -8,7 +8,8 @@
 #include "yt/log/log.h"
 #include "yt/log/datefilelogger.h"
 #include "serverconf.h"
-#include "bus_router.h"
+//#include "bus_router.h"
+#include <zmq.h>
 
 #define MAX_CLIENT_COUNT 1024
 #define MAX_ONE_PACKAGE_LEN 1024*1024
@@ -48,7 +49,7 @@ int main(int argc, char **argv)
 		}
 	}
         if(strlen(configfilename) == 0)
-                strcpy(configfilename,"../etc/router.xml");
+                strcpy(configfilename,"../etc/proxy.xml");
 	cout << "configfilename " << configfilename << endl;
 
 	if(isdaemon)
@@ -107,6 +108,19 @@ int main(int argc, char **argv)
 	//}
 
 	void* context = zmq_init(1);
+	void* xsub = zmq_socket(context, ZMQ_XSUB);
+	zmq_bind(xsub, g_conf.m_subpoint.c_str());
+	void* xpub = zmq_socket(context, ZMQ_XPUB);
+	zmq_bind(xpub, g_conf.m_pubpoint.c_str());
+
+	zmq_proxy(xsub, xpub, NULL);
+	
+	zmq_close(xsub);
+	zmq_close(xpub);
+	zmq_ctx_destroy(context);
+
+/*
+	void* context = zmq_init(1);
 	void* socket = zmq_socket(context, ZMQ_ROUTER);
 	
 	if(!g_conf.m_strName.empty()){
@@ -129,6 +143,7 @@ int main(int argc, char **argv)
 
 	zmq_close(socket);
 	zmq_ctx_destroy(context);
+*/
 
 	if(zoo_delete(zkhandle, g_conf.m_nodepath.c_str(), -1) == ZOK)
 		AC_INFO("delete node success");
@@ -152,7 +167,7 @@ void signal_manage(int signo)
 			break;
 	}
 }
-/*
+
 void* subandpub(void*)
 {
 	void* context = zmq_init(1);
@@ -169,7 +184,7 @@ void* subandpub(void*)
 	
 	return NULL;
 }
-*/
+
 int zookeeper_manage()
 {
 	zoo_set_debug_level(ZOO_LOG_LEVEL_WARN); //set log

@@ -105,6 +105,7 @@ private:
 	
 	int find_address_map(char* addr);
 	int compare_addr(service_Name_map::iterator iter_servieName);
+	int compare_len(unsigned __int64 len_recv, unsigned __int64 len_local);
 
 	void add_requestID_map(string addr, unsigned __int64 requestID);
 	void recycling_watcher();

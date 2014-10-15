@@ -75,6 +75,7 @@ class bus_router
 
 	unsigned int addr_length_;
 	unsigned int msg_length_;
+	unsigned int msg_local_len;
 	uint64_t requestID_;
 
 	long time_;
@@ -103,6 +104,7 @@ private:
 	
 	int find_address_map(char* addr);
 	int compare_addr(serviceName_map::iterator iter_servieName);
+	int compare_len(uint64_t len_recv, uint64_t len_local);
 
 	void add_requestID_map(string addr, uint64_t requestID);
 	void recycling_watcher();

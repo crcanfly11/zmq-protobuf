@@ -31,15 +31,6 @@ bool ServerConf::ReadCfg(const char* configfile)
 	}
 	AC_INFO("logdir  = %s",str);
 	m_logdir = str;
-		
-	str = cfg->Attribute("endpoint");
-	if(!str)
-	{
-		AC_ERROR("read endpoint error");
-		return false;
-	}
-	AC_INFO("endpoint  = %s",str);
-	m_endpoint = str;
 
 	str = cfg->Attribute("name");
 	if(!str)
@@ -50,32 +41,23 @@ bool ServerConf::ReadCfg(const char* configfile)
 	AC_INFO("name  = %s",str);
 	m_strName = str;
 
-	str = cfg->Attribute("replyouttime");
+	str = cfg->Attribute("subpoint");
 	if(!str)
 	{
-		AC_ERROR("read replyouttime error");
+		AC_ERROR("read subpoint error");
 		return false;
 	}
-	AC_INFO("replyouttime  = %s",str);
-	m_replyouttime = atoi(str);
+	AC_INFO("subpoint = %s",str);
+	m_subpoint = str;
 
-	str = cfg->Attribute("heartbeatouttime");
+	str = cfg->Attribute("pubpoint");
 	if(!str)
 	{
-		AC_ERROR("read heartbeatouttime error");
+		AC_ERROR("read pubpoint error");
 		return false;
 	}
-	AC_INFO("heartbeatouttime  = %s",str);
-	m_heartbeatouttime = atoi(str);
-
-	str = cfg->Attribute("msgmaxlen");
-	if(!str)
-	{
-		AC_ERROR("read msgmaxlen error");
-		return false;
-	}
-	AC_INFO("msgmaxlen  = %s",str);
-	m_msgmaxlen = atoi(str);
+	AC_INFO("pubpoint = %s",str);
+	m_pubpoint = str;
 
 	str = cfg->Attribute("idc");
 	if(!str)

@@ -1,0 +1,4 @@
+<?xml version="1.0" ?>
+<config>
+   <cfg logdir = "/home/jcr/bus_router/log/" name="proxy" subpoint="tcp://*:36101" pubpoint="tcp://*:36102" zookeeperhost = "10.15.107.245:2181,10.15.107.246:2181,10.15.107.71:2181" zookeepertimeout = "30000"  idc = "1" businesspath = "/root/bus/sys" appinterface = "sub:tcp://10.15.89.122:36101 pub:tcp://10.15.89.122:36102" nodepath = "/hcroot_status/fcm/bus_proxy" />
+</config>

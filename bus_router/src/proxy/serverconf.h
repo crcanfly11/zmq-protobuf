@@ -13,10 +13,8 @@ class ServerConf
 
 		string m_logdir;
 		string m_strName;
-		string m_endpoint;
-		int m_replyouttime;
-		int m_heartbeatouttime;
-		int m_msgmaxlen;
+		string m_subpoint;
+		string m_pubpoint;
 		string m_idc;
 		string m_businesspath;
 		string m_appinterface;

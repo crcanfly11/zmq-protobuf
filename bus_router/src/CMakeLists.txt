@@ -1,4 +1,5 @@
-PROJECT(bus_router)
+PROJECT(bus)
+ADD_SUBDIRECTORY(proxy)
 CMAKE_MINIMUM_REQUIRED(VERSION 2.6)
 #AUX_SOURCE_DIRECTORY(./ SRC_LIST)
 AUX_SOURCE_DIRECTORY(./router SRC_LIST)
@@ -11,7 +12,8 @@ ADD_DEFINITIONS(-g -W -Wall -Wno-deprecated -D_REENTRANT
 INCLUDE_DIRECTORIES(./ ../include /usr/local/include
 /usr/local/include/c-client-src)
 
-LINK_DIRECTORIES(/usr/local/lib ../lib)
+LINK_DIRECTORIES( ../lib /usr/local/lib /usr/local/protobuf/lib
+/usr/local/zeromq/lib )
 
 ADD_EXECUTABLE(bus_router ${SRC_LIST})
 

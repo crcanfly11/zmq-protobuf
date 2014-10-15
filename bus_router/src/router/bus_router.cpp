@@ -24,8 +24,9 @@ void bus_router::run()
 {
 	GOOGLE_PROTOBUF_VERIFY_VERSION;
 
+	msg_local_len = MESSAGE_MAX_LENGTH*g_conf.m_msgmaxlen;
 	p_addr_ = new char[ADDRESS_MAX_LENGTH];
-	p_msg_ = new char[MESSAGE_MAX_LENGTH*g_conf.m_msgmaxlen];
+	p_msg_ = new char[msg_local_len];
 
 	while(1) {
 		if(end_process)  
@@ -34,50 +35,54 @@ void bus_router::run()
 		zmq_pollitem_t items[] = { { router_socket_, 0, ZMQ_POLLIN, 0 } };
 		int rc = zmq_poll(items, 1, TIMEOUT);
 		if(rc == -1) {
+			AC_ERROR("zmq_poll() return -1.");
 			break;
 		}
 		if(items[0].revents & ZMQ_POLLIN) {
 			addr_length_ = zmq_recv(router_socket_, p_addr_, ADDRESS_MAX_LENGTH, 0);
-			msg_length_ = zmq_recv(router_socket_, p_msg_, MESSAGE_MAX_LENGTH, 0);
+			msg_length_ = zmq_recv(router_socket_, p_msg_, msg_local_len, 0);
+			AC_INFO("msg length:%d", msg_length_);
 
-			p_addr_[addr_length_] = 0;
-			p_msg_[msg_length_] = 0;
+			if(compare_len(msg_length_, msg_local_len) == 0) {
+				p_addr_[addr_length_] = 0;
+				p_msg_[msg_length_] = 0;
 
-			BusHead bus;
-			bus.ParseFromArray(p_msg_, msg_length_);
+				BusHead bus;
+				bus.ParseFromArray(p_msg_, msg_length_);
 
-			request_string_data rd;
-			split_command(bus.servicename(), rd);
+				request_string_data rd;
+				split_command(bus.servicename(), rd);
 
-			switch(rd.command_id)
-			{
-				case 1:
-					router_loginReq(&bus, &rd);
-					break;
-				case 3:
-					router_logoutReq(&bus);
-					break;
-				case 5:
-					//router_ServiceRouteReqSToV(&bus);	
-					break;
-				case 7:
-					//router_ServiceRouteReqVToS(&bus);
-					break;
-				case 8:
-					//router_ServiceRouteStatusNty();
-					break;
-				case 9:
-					//router_ServiceRouteReqVToV(&bus);
-					break;
-				case 11:
-					reset_map(&bus);
-					break;
-				case 88:
-					router_heartbeatReq(&bus);
-					break;
-				default:
-					router_other_dealer(&bus);
-					break;
+				switch(rd.command_id)
+				{
+					case 1:
+						router_loginReq(&bus, &rd);
+						break;
+					case 3:
+						router_logoutReq(&bus);
+						break;
+					case 5:
+						//router_ServiceRouteReqSToV(&bus);	
+						break;
+					case 7:
+						//router_ServiceRouteReqVToS(&bus);
+						break;
+					case 8:
+						//router_ServiceRouteStatusNty();
+						break;
+					case 9:
+						//router_ServiceRouteReqVToV(&bus);
+						break;
+					case 11:
+						reset_map(&bus);
+						break;
+					case 88:
+						router_heartbeatReq(&bus);
+						break;
+					default:
+						router_other_dealer(&bus);
+						break;
+				}
 			}
 		}
 		//retry connection
@@ -91,6 +96,41 @@ void bus_router::run()
 		}	
 	}	
 };
+
+int bus_router::compare_len(uint64_t len_recv, uint64_t len_local)
+{
+	if(len_recv > len_local) {
+		string msg("single packet size exceeds the system limit.");
+
+		RspInfo rsp;
+		rsp.set_rspno(-1);                  
+		rsp.set_rspdesc(msg.c_str(), msg.length());
+
+		std::string rsp_str;
+		rsp.SerializeToString(&rsp_str);
+
+		BusHead bh;
+		bh.set_servicename("reply/bus/rspinfo");
+		bh.set_allocated_data(&rsp_str);
+	
+		int bh_size = bh.ByteSize();
+		void* bh_buf = malloc(bh_size);
+		bh.SerializeToArray(bh_buf, bh_size);	
+		send_msg(p_addr_, addr_length_, bh_buf, bh_size);
+		
+		AC_INFO("%s.", msg.c_str());
+
+		free(bh_buf);	
+		bh.release_data();
+		bh.release_servicename();
+		rsp.release_rspdesc();		
+
+		return -1;
+	}
+
+	return 0;
+};
+
 void bus_router::reset_map(BusHead* bus)
 {
 	clear();
@@ -112,7 +152,8 @@ void bus_router::reset_map(BusHead* bus)
 	void* bh_buf = malloc(bh_size);
 	bh.SerializeToArray(bh_buf, bh_size);	
 	send_msg(p_addr_, addr_length_, bh_buf, bh_size);
-	AC_INFO("requestID: %d, request clear map.", bus->requestid());
+
+	AC_INFO("receive clear req, requestID: %d", bus->requestid());
 
 	free(bh_buf);	
 	bh.release_data();
@@ -187,6 +228,7 @@ void bus_router::router_loginReq(BusHead* bus, request_string_data* rd)
 		//send_error_msg_back(bus, "already logined.");
 		//return;
 		router_loginRsp(bus, rd);
+		return;
 	}
 
 	split_anyreq(loginReq.url(), *rd);
@@ -225,7 +267,7 @@ void bus_router::router_loginReq(BusHead* bus, request_string_data* rd)
 		}	
 	}
 
-	AC_INFO("request ID:%d login.", bus->requestid());
+	AC_INFO("receive login req, requestID:%d", bus->requestid());
 
 	//Ó¦´ğ
 	router_loginRsp(bus, rd);
@@ -264,6 +306,8 @@ void bus_router::router_loginRsp(BusHead* bus, request_string_data* rd)
 	bh.SerializeToArray(bh_buf, bh_size);	
 	send_msg(p_addr_, addr_length_, bh_buf, bh_size);
 
+	AC_INFO("send login rsp, requestID:%d, size:%d", bus->requestid(), bh_size);
+
 	free(bh_buf);	
 	bh.release_data();
 	bh.release_servicename();
@@ -276,6 +320,7 @@ void bus_router::router_logoutReq(BusHead* bus)
 	addr_map::iterator iter_addr_map = addr_map_.find(string(p_addr_, addr_length_));
 	if(iter_addr_map == addr_map_.end()) {
 		send_error_msg_back(bus, "unregistered.");
+		AC_INFO("receive error logout req, requestID:%d", bus->requestid());
 		return;
 	}
 
@@ -310,7 +355,7 @@ void bus_router::router_logoutReq(BusHead* bus)
 
 	addr_map_.erase(iter_addr_map);	
 
-	AC_INFO("request ID:%d logout.", bus->requestid());
+	AC_INFO("receive logout req, requestID:%d", bus->requestid());
 
 	router_logoutRsp(bus);
 };
@@ -337,6 +382,8 @@ void bus_router::router_logoutRsp(BusHead* bus)
 	void* bh_buf = malloc(bh_size);
 	bh.SerializeToArray(bh_buf, bh_size);	
 	send_msg(p_addr_, addr_length_, bh_buf, bh_size);
+
+	AC_INFO("send logout rsp, request ID:%d, size:%d", bus->requestid(), bh_size);
 
 	free(bh_buf);	
 	bh.release_data();
@@ -393,6 +440,8 @@ void bus_router::router_heartbeatRsp(BusHead* bus)
 	bh.SerializeToArray(bh_buf, bh_size);	
 	send_msg(p_addr_, addr_length_, bh_buf, bh_size);
 
+	//AC_DEBUG("send heartbeat rsp, requestID:%d, size:%d", bus->requestid(), bh_size);
+ 
 	free(bh_buf);	
 	bh.release_data();
 	bh.release_servicename();
@@ -416,11 +465,13 @@ void bus_router::router_other_dealer(BusHead* bus)
 		serviceName_map::iterator iter_servieName = serviceName_map_.find(bus->servicename());
 		if(iter_servieName == serviceName_map_.end()) {
 			send_error_msg_back(bus, "unregistered body type no.");
+			AC_INFO("receive error req:unregistered body type no, requestID:%d", bus->requestid());
 			return;
 		}
 		else {    
 			if(compare_addr(iter_servieName) != 0) {
 				send_error_msg_back(bus, "not request self service.");
+				AC_INFO("receive error req: not request self service, requestID:%d", bus->requestid());
 				return;
 			}
 			
@@ -438,8 +489,8 @@ void bus_router::router_other_dealer(BusHead* bus)
 			bus->set_requestid(requestID_);
 			
 			send_msg((void*)ad.addr.c_str(), ad.addr_length, bus);
-
-			AC_INFO("request ID:%d forwarding. bag size:%d", bus->requestid(), ad.addr_length);
+			
+			AC_INFO("forwarding req, requestID:%d, size:%d", bus->requestid(), msg_length_);
 		}			
 	}
 	else {
@@ -447,17 +498,17 @@ void bus_router::router_other_dealer(BusHead* bus)
 		bus->set_requestid(rep_addr.second.requestID);
 
 		send_msg((void*)rep_addr.first.c_str(), rep_addr.second.addr_length, bus);
-
+		
 		if(bus->endflag() == 0) {
 			requestID_map_.erase(iter_requestID);
-			AC_INFO("request ID:%d reply.", bus->requestid());
+			AC_INFO("send forwarding rsp, requestID:%d, size:%d", bus->requestid(), msg_length_);
 		}
 		else {
 			//reset timer 
 			timer_map::iterator iter_timer = timer_map_.find(timer_pair(iter_requestID->second.second.reset_time, iter_requestID->first.second));
 			if(iter_timer != timer_map_.end()) {
 				iter_timer->second.times = iter_timer->second.times + 1;
-				AC_INFO("request ID:%d reset timer.", bus->requestid());	
+				AC_INFO("reset timer, request ID:%d", bus->requestid());	
 			}
 		}
 	}
@@ -577,8 +628,9 @@ void bus_router::router_timeoutRsp(addr_pair& pair)
 	if(iter_addr == addr_map_.end()) {
 		str = "lost connect with app";
 	}
-	else 
+	else { 
 		str = "replay time out.";
+	}
 
 	RspInfo rsp;
 	rsp.set_rspno(-1);
@@ -594,7 +646,7 @@ void bus_router::router_timeoutRsp(addr_pair& pair)
 	rep_bh.SerializeToArray(bh_buf, bh_size);	
 
 	send_msg((void*)pair.first.c_str(), pair.second.addr_length, bh_buf, bh_size);		
-	AC_INFO("request ID:%d reply time out.", pair.second.requestID); 
+	AC_INFO("%s, request ID:%d", str.c_str(),pair.second.requestID);
 
 	free(bh_buf);	
 	rsp.release_rspdesc();
@@ -629,14 +681,13 @@ void bus_router::recycling_heartbeat()
 					}
 				}
 			}
-
+			AC_INFO("heartbeat time out.");
+			
 			addr_map_.erase(iter->second);
 			heartbeat_map_.erase(iter);
-
-			//cout<< "erase add size: "<< addr_map_.size()<< endl;
-			//cout<< "erase heartbeat size: "<< heartbeat_map_.size()<< endl;
 		}
 	}
+	
 };
 
 void bus_router::clear()
@@ -669,4 +720,6 @@ void bus_router::clear()
 	} 
 	requestID_map_.clear();
 	timer_map_.clear();
+	
+	AC_INFO("clear");
 };

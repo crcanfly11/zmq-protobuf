@@ -41,44 +41,46 @@ void bus_router::run()
 			addr_length_ = zmq_recv(router_socket_, p_addr_, ADDRESS_MAX_LENGTH, 0);
 			msg_length_ = zmq_recv(router_socket_, p_msg_, MESSAGE_MAX_LENGTH, 0);
 
-			p_addr_[addr_length_] = 0;
-			p_msg_[msg_length_] = 0;		
+			if(compare_len(msg_length_, MESSAGE_MAX_LENGTH) == 0) {
+				p_addr_[addr_length_] = 0;
+				p_msg_[msg_length_] = 0;		
 
-			BusHead bus;
-			bus.ParseFromArray(p_msg_, msg_length_);
+				BusHead bus;
+				bus.ParseFromArray(p_msg_, msg_length_);
 
-			request_string_data rd;
-			split_command(bus.servicename(), rd); 
+				request_string_data rd;
+				split_command(bus.servicename(), rd); 
 	
-			switch(rd.command_id)
-			{
-				case 1:
-					router_loginReq(&bus, &rd); 
-					break;
-				case 3:
-					router_logoutReq(&bus);
-					break;
-				case 5:
-					//router_ServiceRouteReqSToV(&bus);	
-					break;
-				case 7:
-					//router_ServiceRouteReqVToS(&bus);
-					break;
-				case 8:
-					//router_ServiceRouteStatusNty();
-					break;
-				case 9:
-					//router_ServiceRouteReqVToV(&bus);
-					break;
-				case 11:
-					reset_map(&bus);
-					break;
-				case 88:
-					router_heartbeatReq(&bus);
-					break;
-				default:
-					router_other_dealer(&bus);
-					break;
+				switch(rd.command_id)
+				{
+					case 1:
+						router_loginReq(&bus, &rd); 
+						break;
+					case 3:
+						router_logoutReq(&bus);
+						break;
+					case 5:
+						//router_ServiceRouteReqSToV(&bus);	
+						break;
+					case 7:
+						//router_ServiceRouteReqVToS(&bus);
+						break;
+					case 8:
+						//router_ServiceRouteStatusNty();
+						break;
+					case 9:
+						//router_ServiceRouteReqVToV(&bus);
+						break;
+					case 11:
+						reset_map(&bus);
+						break;
+					case 88:
+						router_heartbeatReq(&bus);
+						break;
+					default:
+						router_other_dealer(&bus);
+						break;
+				}
 			}
         }  
         // 重试连接  
@@ -98,6 +100,38 @@ void bus_router::run()
 			time_ = tm;
 		}
 	}	
+};
+
+int bus_router::compare_len(unsigned __int64 len_recv, unsigned __int64 len_local)
+{
+	if(len_recv > len_local) {
+		string msg("Single packet size exceeds the system limit.");
+
+		RspInfo rsp;
+		rsp.set_rspno(-1);                  //错误编号 没有对应关系
+		rsp.set_rspdesc(msg.c_str(), msg.length());
+
+		std::string rsp_str;
+		rsp.SerializeToString(&rsp_str);
+
+		BusHead bh;
+		bh.set_servicename("reply/bus/rspinfo");
+		bh.set_allocated_data(&rsp_str);
+	
+		int bh_size = bh.ByteSize();
+		void* bh_buf = malloc(bh_size);
+		bh.SerializeToArray(bh_buf, bh_size);	
+		send_msg(p_addr_, addr_length_, bh_buf, bh_size);
+
+		free(bh_buf);	
+		bh.release_data();
+		bh.release_servicename();
+		rsp.release_rspdesc();		
+
+		return -1;
+	}
+
+	return 0;
 };
 
 void bus_router::print_map()
@@ -149,6 +183,7 @@ void bus_router::router_loginReq(BusHead* bus, request_string_data* rd)
 		//send_error_msg_back(bus, "already logined.");
 		//return;
 		router_loginRsp(bus, rd);
+		return;
 	}
 	
 	split_anyreq(loginReq.url(), *rd);
